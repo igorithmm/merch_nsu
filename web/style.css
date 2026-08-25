@@ -194,7 +194,7 @@ main { padding: 20px 18px 80px; max-width: 1500px; margin: 0 auto; }
 .card__price { font-weight: 700; white-space: nowrap; }
 .card__total { font-size: 12px; color: var(--text-faint); margin-top: 2px; white-space: nowrap; }
 
-.sizes { display: grid; gap: 7px; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); }
+.sizes { display: grid; gap: 7px; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
 
 .size {
   border-radius: var(--radius-sm); overflow: hidden;
@@ -476,3 +476,11 @@ html[data-theme="dark"] .badge--calm { color: var(--bg); }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); }
 .select--sm { padding: 4px 8px; font-size: 13px; border-radius: 8px; }
 .toast__warn { color: var(--danger); font-weight: 650; }
+
+/* ---------- Фильтр по размерам ---------- */
+.sizefilter { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: -6px 0 14px; }
+.sizefilter__label { font-size: 12px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: .06em; margin-right: 3px; }
+.chip--size { min-width: 46px; justify-content: center; text-align: center;
+  font-variant-numeric: tabular-nums; font-weight: 650; padding: 6px 11px; }
+.chip--clear { border-style: dashed; }

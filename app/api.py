@@ -892,6 +892,13 @@ def bootstrap():
             "kinds": kinds,
             "colors": sorted({p["color"] for p in products if p["color"]}),
             "prints": sorted({p["print_name"] for p in products if p["print_name"]}),
+            "sizes": sorted(
+                {
+                    s["size"] for p in products if p["category"] == db.CAT_CLOTHING
+                    for s in p["sizes"]
+                },
+                key=_natural_size_key,
+            ),
             "materials": sorted({p["material"] for p in products if p["material"]}),
             "kind_suggestions": {
                 cat: sorted(set(names) | {p["kind"] for p in products if p["category"] == cat})

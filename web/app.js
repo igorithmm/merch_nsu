@@ -4,7 +4,7 @@ const state = {
   data: null,
   tab: 'stock',
   seller: localStorage.getItem('merch.seller') || '',
-  filters: { q: '', category: '', kind: '', color: '', print: '', lowOnly: false, no1c: false },
+  filters: { q: '', category: '', kind: '', color: '', print: '', sizes: [], lowOnly: false, no1c: false },
   journal: { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '', from: '', to: '',
              product_id: '', trash: false },
   wishes: { q: '', status: '' },
@@ -264,6 +264,13 @@ function setTab(tab) {
 
 /* ---------- Вкладка «Остатки» ---------- */
 
+// Размеры товара с учётом выбранного фильтра размеров.
+function shownSizes(p) {
+  const picked = state.filters.sizes;
+  if (!picked.length || isSouvenir(p)) return p.sizes;
+  return p.sizes.filter((s) => picked.includes(s.size));
+}
+
 function visibleProducts() {
   const f = state.filters;
   const low = state.data.settings.low_stock;
@@ -273,8 +280,10 @@ function visibleProducts() {
     if (f.kind && p.kind !== f.kind) return false;
     if (f.color && p.color !== f.color) return false;
     if (f.print && p.print_name !== f.print) return false;
-    if (f.lowOnly && !p.sizes.some((s) => s.qty <= low)) return false;
+    // Фильтр по размерам — про одежду: сувенирку он прячет.
+    if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
     if (f.no1c && !p.needs_1c) return false;
+    if (f.lowOnly && !shownSizes(p).some((s) => s.qty <= low)) return false;
     if (needle) {
       const hay = `${p.kind} ${p.color} ${p.print_name} ${p.material} ${p.note} ${p.name_1c}`.toLowerCase();
       if (!needle.split(/\s+/).every((word) => hay.includes(word))) return false;
@@ -300,7 +309,19 @@ function renderFilters() {
     + sel('print', 'Любой принт', facets.prints, f.print)
     + `<button class="chip chip--danger ${f.lowOnly ? 'is-active' : ''}" data-filter="lowOnly">Заканчивается</button>`
     + `<button class="chip chip--warn ${f.no1c ? 'is-active' : ''}" data-filter="no1c">Нет в 1С</button>`;
-  $('#resetFilters').hidden = !(f.category || f.kind || f.color || f.print || f.lowOnly || f.no1c || f.q);
+
+  // Размеры — отдельной строкой, выбирать можно сразу несколько.
+  const sizes = facets.sizes || [];
+  const box = $('#sizeFilter');
+  box.hidden = !sizes.length;
+  box.innerHTML = sizes.length ? `
+    <span class="sizefilter__label">Размеры</span>
+    ${sizes.map((size) => `<button class="chip chip--size ${f.sizes.includes(size) ? 'is-active' : ''}"
+        data-size-filter="${esc(size)}">${esc(size)}</button>`).join('')}
+    ${f.sizes.length ? '<button class="chip chip--clear" data-size-filter="__clear">Все размеры</button>' : ''}` : '';
+
+  $('#resetFilters').hidden = !(f.category || f.kind || f.color || f.print
+    || f.sizes.length || f.lowOnly || f.no1c || f.q);
 }
 
 function sizeClass(qty, low) {
@@ -319,6 +340,8 @@ function renderStock() {
     <span><b>${items.length}</b> ${plural(items.length, 'модель', 'модели', 'моделей')} на экране</span>
     <span><span class="dot" style="background:var(--danger)"></span>0 шт — закончилось</span>
     <span><span class="dot" style="background:var(--warn)"></span>≤ ${low} шт — пора заказывать</span>
+    ${state.filters.sizes.length
+      ? `<span><b>${state.filters.sizes.join(', ')}</b> — показаны только эти размеры</span>` : ''}
     <span class="legend__tip">Тап по числу — продажа 1 шт. Кнопки − и + спросят причину.</span>` : '';
 
   if (!state.data.products.length) {
@@ -356,10 +379,13 @@ function renderCard(p) {
   const low = state.data.settings.low_stock;
   const swatch = SWATCHES[(p.color || '').toLowerCase()] || 'var(--border-strong)';
   const souvenir = isSouvenir(p);
+  const rows = shownSizes(p);
+  const partial = !souvenir && rows.length < p.sizes.length;
   const body = souvenir
     ? `<div class="sizes sizes--single">${tile(p, p.sizes[0] || { size: '—', qty: 0 }, low, false)}
          <div class="single-hint">Сувенир — без размеров</div></div>`
-    : `<div class="sizes">${p.sizes.map((s) => tile(p, s, low, true)).join('')}</div>`;
+    : `<div class="sizes">${rows.map((s) => tile(p, s, low, true)).join('')}</div>`;
+  const shownQty = rows.reduce((sum, s) => sum + s.qty, 0);
 
   const flags = [
     p.needs_1c ? '<span class="tag tag--warn" title="У товара не заполнено наименование в 1С">Нет в 1С</span>' : '',
@@ -384,7 +410,9 @@ function renderCard(p) {
       </div>
       <div class="card__side">
         <div class="card__price">${money(p.price)}</div>
-        <div class="card__total">всего ${pcs(p.total)}</div>
+        <div class="card__total">${partial
+          ? `${pcs(shownQty)} в выбранных · всего ${p.total}`
+          : `всего ${pcs(p.total)}`}</div>
       </div>
     </div>
     ${body}
@@ -989,6 +1017,18 @@ function bind() {
     const value = e.target.value;
     searchTimer = setTimeout(() => { state.filters.q = value; renderStock(); }, 120);
   });
+  $('#sizeFilter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-size-filter]');
+    if (!chip) return;
+    const size = chip.dataset.sizeFilter;
+    if (size === '__clear') state.filters.sizes = [];
+    else {
+      const picked = state.filters.sizes;
+      const at = picked.indexOf(size);
+      if (at === -1) picked.push(size); else picked.splice(at, 1);
+    }
+    renderStock();
+  });
   $('#filters').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
@@ -1004,7 +1044,7 @@ function bind() {
     renderStock();
   });
   $('#resetFilters').addEventListener('click', () => {
-    state.filters = { q: '', category: '', kind: '', color: '', print: '', lowOnly: false, no1c: false };
+    state.filters = { q: '', category: '', kind: '', color: '', print: '', sizes: [], lowOnly: false, no1c: false };
     $('#search').value = '';
     renderStock();
   });
