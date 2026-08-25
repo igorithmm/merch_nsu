@@ -4,26 +4,57 @@ import os
 import re
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 
 DB_PATH = os.environ.get(
     "MERCH_DB",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "merch.db"),
 )
 
-# Типы движений товара.
-KIND_SALE = "sale"            # продажа
-KIND_RETURN = "return"        # возврат покупателем
-KIND_RECEIPT = "receipt"      # приёмка партии
-KIND_CORRECTION = "correction"  # исправление / инвентаризация
-KIND_WRITEOFF = "writeoff"    # списание (брак, подарок)
+# Категории товара.
+CAT_CLOTHING = "clothing"    # одежда: есть размерный ряд и материал
+CAT_SOUVENIR = "souvenir"    # сувенирка: одна позиция без размеров
 
-KINDS = (KIND_SALE, KIND_RETURN, KIND_RECEIPT, KIND_CORRECTION, KIND_WRITEOFF)
+CATEGORIES = (CAT_CLOTHING, CAT_SOUVENIR)
+
+# Размер-заглушка для сувенирки: в интерфейсе не показывается.
+ONE_SIZE = "—"
+
+# Операции, меняющие остаток.
+KIND_SALE = "sale"            # продажа
+KIND_RETURN = "return"        # возврат от покупателя
+KIND_RECEIPT = "receipt"      # поставка
+KIND_DEFECT = "defect"        # брак, списание
+KIND_MISTAKE = "mistake"      # случайный клик, исправление ошибки
+KIND_CORRECTION = "correction"  # инвентаризация и откаты
+KIND_WRITEOFF = "writeoff"    # старое списание, осталось в базах прошлой версии
+
+STOCK_KINDS = (
+    KIND_SALE, KIND_RETURN, KIND_RECEIPT, KIND_DEFECT, KIND_MISTAKE,
+    KIND_CORRECTION, KIND_WRITEOFF,
+)
+
+# События справочника — тоже строки журнала, но остаток не меняют.
+KIND_PRODUCT_ADDED = "product_added"
+KIND_PRODUCT_EDITED = "product_edited"
+KIND_PRODUCT_ARCHIVED = "product_archived"
+KIND_PRODUCT_RESTORED = "product_restored"
+KIND_PRODUCT_DELETED = "product_deleted"
+
+EVENT_KINDS = (
+    KIND_PRODUCT_ADDED, KIND_PRODUCT_EDITED, KIND_PRODUCT_ARCHIVED,
+    KIND_PRODUCT_RESTORED, KIND_PRODUCT_DELETED,
+)
+
+KINDS = STOCK_KINDS + EVENT_KINDS
 
 # Движения, которые считаются выручкой.
 REVENUE_KINDS = (KIND_SALE, KIND_RETURN)
 
-SCHEMA = """
+# Через сколько дней корзина очищается сама.
+TRASH_DAYS = 60
+
+SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -38,11 +69,15 @@ CREATE TABLE IF NOT EXISTS sellers (
 
 CREATE TABLE IF NOT EXISTS products (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    category   TEXT NOT NULL DEFAULT 'clothing',
     kind       TEXT NOT NULL,
     color      TEXT NOT NULL DEFAULT '',
     print_name TEXT NOT NULL DEFAULT '',
+    material   TEXT NOT NULL DEFAULT '',
     price      INTEGER NOT NULL DEFAULT 0,
     sizes      TEXT NOT NULL DEFAULT '',
+    name_1c    TEXT NOT NULL DEFAULT '',
+    link       TEXT NOT NULL DEFAULT '',
     note       TEXT NOT NULL DEFAULT '',
     archived   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
@@ -55,22 +90,46 @@ CREATE TABLE IF NOT EXISTS stock (
     PRIMARY KEY (product_id, size)
 );
 
+-- Журнал действий: и движения товара, и события справочника.
+-- title — снимок названия на момент операции, поэтому запись переживает
+-- переименование и даже удаление товара.
 CREATE TABLE IF NOT EXISTS movements (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts         TEXT NOT NULL,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    size       TEXT NOT NULL,
-    delta      INTEGER NOT NULL,
-    kind       TEXT NOT NULL,
-    seller     TEXT NOT NULL DEFAULT '',
-    price      INTEGER NOT NULL DEFAULT 0,
-    note       TEXT NOT NULL DEFAULT '',
-    undone     INTEGER NOT NULL DEFAULT 0
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    product_id  INTEGER REFERENCES products(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    size        TEXT NOT NULL DEFAULT '',
+    delta       INTEGER NOT NULL DEFAULT 0,
+    kind        TEXT NOT NULL,
+    seller      TEXT NOT NULL DEFAULT '',
+    price       INTEGER NOT NULL DEFAULT 0,
+    note        TEXT NOT NULL DEFAULT '',
+    undone      INTEGER NOT NULL DEFAULT 0,
+    needs_punch INTEGER NOT NULL DEFAULT 0,
+    punched     INTEGER NOT NULL DEFAULT 0,
+    deleted_at  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS wishes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asked_on    TEXT NOT NULL,
+    product     TEXT NOT NULL,
+    contact     TEXT NOT NULL DEFAULT '',
+    seller      TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'open',
+    closed_at   TEXT,
+    created_at  TEXT NOT NULL
+);
+"""
+
+# Индексы создаются после миграции: на старой таблице колонок из них ещё нет.
+SCHEMA_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_mov_ts ON movements(ts);
 CREATE INDEX IF NOT EXISTS idx_mov_product ON movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_mov_kind ON movements(kind);
+CREATE INDEX IF NOT EXISTS idx_mov_trash ON movements(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_mov_punch ON movements(needs_punch, punched);
 """
 
 _lock = threading.RLock()
@@ -82,8 +141,52 @@ def now_iso():
     return datetime.now().replace(microsecond=0).isoformat(sep=" ")
 
 
-def utc_now_iso():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+def today_iso():
+    return datetime.now().date().isoformat()
+
+
+# --- Подключение и миграция -----------------------------------------------
+
+def _columns(conn, table):
+    return {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+
+
+def _migrate(conn):
+    """Доводит базу прошлой версии до текущей схемы, не теряя данных."""
+    new_product_columns = [
+        ("category", "TEXT NOT NULL DEFAULT 'clothing'"),
+        ("material", "TEXT NOT NULL DEFAULT ''"),
+        ("name_1c", "TEXT NOT NULL DEFAULT ''"),
+        ("link", "TEXT NOT NULL DEFAULT ''"),
+    ]
+    have = _columns(conn, "products")
+    for name, ddl in new_product_columns:
+        if name not in have:
+            conn.execute("ALTER TABLE products ADD COLUMN %s %s" % (name, ddl))
+
+    if "deleted_at" in _columns(conn, "movements"):
+        return
+
+    # Журнал перестраиваем: товар в записи стал необязательным (чтобы история
+    # переживала удаление товара) и добавился снимок названия.
+    conn.execute("ALTER TABLE movements RENAME TO movements_old")
+    conn.executescript(SCHEMA_TABLES)
+    conn.execute(
+        """
+        INSERT INTO movements(id, ts, product_id, title, size, delta, kind,
+                              seller, price, note, undone)
+        SELECT m.id, m.ts, m.product_id,
+               COALESCE(
+                   TRIM(p.kind || ' ' || p.color) ||
+                   CASE WHEN COALESCE(p.print_name, '') <> ''
+                        THEN ' · ' || p.print_name ELSE '' END,
+                   ''),
+               m.size, m.delta, m.kind, m.seller, m.price, m.note, m.undone
+        FROM movements_old m
+        LEFT JOIN products p ON p.id = m.product_id
+        """
+    )
+    conn.execute("DROP TABLE movements_old")
 
 
 def connect():
@@ -91,12 +194,15 @@ def connect():
     with _lock:
         if _conn is None:
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-            _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            _conn.row_factory = sqlite3.Row
-            _conn.execute("PRAGMA foreign_keys = ON")
-            _conn.execute("PRAGMA journal_mode = WAL")
-            _conn.executescript(SCHEMA)
-            _conn.commit()
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.executescript(SCHEMA_TABLES)
+            _migrate(conn)          # до индексов и внешних ключей: миграция перестраивает таблицы
+            conn.executescript(SCHEMA_INDEXES)
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.commit()
+            _conn = conn
         return _conn
 
 
@@ -133,7 +239,17 @@ def set_setting(key, value):
     )
 
 
-# --- Размеры ---------------------------------------------------------------
+# --- Товар -----------------------------------------------------------------
+
+def product_title(p):
+    """«Толстовка фиолетовая · большая печать» — как товар подписан на карточке."""
+    parts = [(p.get("kind") or "").strip(), (p.get("color") or "").strip()]
+    title = " ".join(x for x in parts if x)
+    print_name = (p.get("print_name") or "").strip()
+    if print_name:
+        title += " · " + print_name
+    return title
+
 
 def parse_sizes(raw):
     """Строку «42, 44,46» превращает в упорядоченный список без дублей."""
@@ -171,15 +287,25 @@ def sync_stock_rows(product_id, sizes):
         conn.commit()
 
 
-# --- Движение товара -------------------------------------------------------
+# --- Журнал ----------------------------------------------------------------
 
 class StockError(Exception):
     """Операция невозможна (например, ушли бы в минус)."""
 
 
+def log_event(kind, product_id, title, seller="", note=""):
+    """Запись справочника в журнал: заведение товара, правка, архив."""
+    cur = execute(
+        "INSERT INTO movements(ts, product_id, title, kind, seller, note) "
+        "VALUES(?, ?, ?, ?, ?, ?)",
+        (now_iso(), product_id, title, kind, seller, note),
+    )
+    return cur.lastrowid
+
+
 def apply_movement(product_id, size, delta, kind, seller="", note="", allow_negative=False):
     """Меняет остаток и пишет строку в журнал. Возвращает (movement_id, new_qty)."""
-    if kind not in KINDS:
+    if kind not in STOCK_KINDS:
         raise StockError("Неизвестный тип операции: %s" % kind)
     if delta == 0:
         raise StockError("Нулевое изменение остатка")
@@ -187,7 +313,7 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
     with _lock:
         conn = connect()
         product = conn.execute(
-            "SELECT id, price, archived FROM products WHERE id = ?", (product_id,)
+            "SELECT * FROM products WHERE id = ?", (product_id,)
         ).fetchone()
         if product is None:
             raise StockError("Товар не найден")
@@ -200,15 +326,22 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
         if new_qty < 0 and not allow_negative:
             raise StockError("На складе %d шт — списать %d нельзя" % (current, -delta))
 
+        # Продажу товара без наименования в 1С нельзя пробить в кассе сразу:
+        # помечаем, чтобы не забыть сделать это позже.
+        needs_punch = 1 if (kind == KIND_SALE and not (product["name_1c"] or "").strip()) else 0
+
         conn.execute(
             "INSERT INTO stock(product_id, size, qty) VALUES(?, ?, ?) "
             "ON CONFLICT(product_id, size) DO UPDATE SET qty = excluded.qty",
             (product_id, size, new_qty),
         )
         cur = conn.execute(
-            "INSERT INTO movements(ts, product_id, size, delta, kind, seller, price, note) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (now_iso(), product_id, size, delta, kind, seller, product["price"], note),
+            "INSERT INTO movements(ts, product_id, title, size, delta, kind, seller, price, "
+            "note, needs_punch) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                now_iso(), product_id, product_title(dict(product)), size, delta, kind,
+                seller, product["price"], note, needs_punch,
+            ),
         )
         conn.commit()
         return cur.lastrowid, new_qty
@@ -223,6 +356,10 @@ def undo_movement(movement_id, seller=""):
             raise StockError("Запись журнала не найдена")
         if mov["undone"]:
             raise StockError("Эта операция уже отменена")
+        if mov["delta"] == 0:
+            raise StockError("Эту запись нельзя откатить — она не меняла остаток")
+        if mov["product_id"] is None:
+            raise StockError("Товар удалён, откатывать нечего")
 
         row = conn.execute(
             "SELECT qty FROM stock WHERE product_id = ? AND size = ?",
@@ -240,18 +377,32 @@ def undo_movement(movement_id, seller=""):
         )
         conn.execute("UPDATE movements SET undone = 1 WHERE id = ?", (movement_id,))
         conn.execute(
-            "INSERT INTO movements(ts, product_id, size, delta, kind, seller, price, note) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO movements(ts, product_id, title, size, delta, kind, seller, price, note) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                now_iso(),
-                mov["product_id"],
-                mov["size"],
-                -mov["delta"],
-                KIND_CORRECTION,
-                seller,
-                mov["price"],
-                "Отмена операции №%d" % movement_id,
+                now_iso(), mov["product_id"], mov["title"], mov["size"], -mov["delta"],
+                KIND_CORRECTION, seller, mov["price"], "Отмена операции №%d" % movement_id,
             ),
         )
         conn.commit()
         return new_qty
+
+
+# --- Корзина ---------------------------------------------------------------
+
+def purge_trash(days=TRASH_DAYS):
+    """Удаляет из корзины всё, что пролежало дольше срока."""
+    cutoff = (datetime.now() - timedelta(days=days)).replace(microsecond=0).isoformat(sep=" ")
+    cur = execute(
+        "DELETE FROM movements WHERE deleted_at IS NOT NULL AND deleted_at < ?", (cutoff,)
+    )
+    return cur.rowcount
+
+
+def purge_trash_daily():
+    """Чистку достаточно делать раз в сутки — вызывается при открытии приложения."""
+    if get_setting("last_purge") == today_iso():
+        return 0
+    removed = purge_trash()
+    set_setting("last_purge", today_iso())
+    return removed

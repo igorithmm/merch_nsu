@@ -109,8 +109,19 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if route == "movements":
                 return self._json(api.list_movements(params))
+            if route == "unpunched":
+                return self._json(api.list_unpunched())
+            if route == "wishes":
+                return self._json({"wishes": api.list_wishes(params)})
             if route == "reports":
                 return self._json(api.build_reports(params))
+            if route == "export/wishes.csv":
+                return self._send(
+                    200,
+                    "\ufeff" + api.export_wishes_csv(),
+                    "text/csv; charset=utf-8",
+                    {"Content-Disposition": 'attachment; filename="zhelaniya.csv"'},
+                )
             if route == "export/stock.csv":
                 return self._send(
                     200,
@@ -129,16 +140,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "POST":
             body = self._read_json()
+            seller = (body.get("seller") or "").strip()
             if route == "products":
-                product_id = api.save_product(body)
+                product_id = api.save_product(body, seller=seller)
                 return self._json({"id": product_id, "products": api.list_products()})
             match = re.fullmatch(r"products/(\d+)", route)
             if match:
-                api.save_product(body, product_id=int(match.group(1)))
+                api.save_product(body, product_id=int(match.group(1)), seller=seller)
                 return self._json({"products": api.list_products()})
             match = re.fullmatch(r"products/(\d+)/archive", route)
             if match:
-                api.archive_product(int(match.group(1)), bool(body.get("archived", True)))
+                api.archive_product(
+                    int(match.group(1)), bool(body.get("archived", True)), seller=seller
+                )
                 return self._json({"ok": True})
             if route == "move":
                 return self._json(api.do_move(body))
@@ -148,6 +162,30 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.do_set_qty(body))
             if route == "undo":
                 return self._json(api.do_undo(body))
+            if route == "movements/trash":
+                return self._json(api.trash_movement(body))
+            match = re.fullmatch(r"movements/(\d+)/restore", route)
+            if match:
+                api.restore_movement(int(match.group(1)))
+                return self._json({"ok": True})
+            match = re.fullmatch(r"movements/(\d+)/purge", route)
+            if match:
+                api.purge_movement(int(match.group(1)))
+                return self._json({"ok": True})
+            if route == "trash/empty":
+                return self._json({"removed": api.empty_trash()})
+            if route == "punched":
+                return self._json(api.mark_punched(body))
+            if route == "wishes":
+                return self._json({"id": api.save_wish(body), "wishes": api.list_wishes(body)})
+            match = re.fullmatch(r"wishes/(\d+)", route)
+            if match:
+                api.save_wish(body, wish_id=int(match.group(1)))
+                return self._json({"ok": True})
+            match = re.fullmatch(r"wishes/(\d+)/status", route)
+            if match:
+                api.set_wish_status(int(match.group(1)), (body.get("status") or "").strip())
+                return self._json({"ok": True})
             if route == "demo":
                 from . import demo
 
@@ -175,8 +213,12 @@ class Handler(BaseHTTPRequestHandler):
         if method == "DELETE":
             match = re.fullmatch(r"products/(\d+)", route)
             if match:
-                api.delete_product(int(match.group(1)))
+                api.delete_product(int(match.group(1)), seller=params.get("seller", ""))
                 return self._json({"products": api.list_products()})
+            match = re.fullmatch(r"wishes/(\d+)", route)
+            if match:
+                api.delete_wish(int(match.group(1)))
+                return self._json({"ok": True})
             return self._error("Неизвестный запрос", 404)
 
         return self._error("Метод не поддерживается", 405)
@@ -208,6 +250,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(host="127.0.0.1", port=8765):
     global _httpd
     db.connect()
+    db.purge_trash_daily()   # чистим корзину и при запуске, не только при открытии страницы
     _httpd = ThreadingHTTPServer((host, port), Handler)
     _httpd.daemon_threads = True
     return _httpd

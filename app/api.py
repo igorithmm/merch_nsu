@@ -10,18 +10,52 @@ SIZE_PRESETS = [
     {"id": "ru42_56", "label": "Российские 42–56", "sizes": ["42", "44", "46", "48", "50", "52", "54", "56"]},
     {"id": "ru40_60", "label": "Российские 40–60", "sizes": ["40", "42", "44", "46", "48", "50", "52", "54", "56", "58", "60"]},
     {"id": "letters", "label": "Буквенные XS–XXL", "sizes": ["XS", "S", "M", "L", "XL", "XXL"]},
-    {"id": "one", "label": "Один размер", "sizes": ["ONE"]},
 ]
 
 KIND_LABELS = {
     db.KIND_SALE: "Продажа",
     db.KIND_RETURN: "Возврат",
-    db.KIND_RECEIPT: "Приёмка",
+    db.KIND_RECEIPT: "Поставка",
+    db.KIND_DEFECT: "Брак",
+    db.KIND_MISTAKE: "Случайный клик",
     db.KIND_CORRECTION: "Коррекция",
     db.KIND_WRITEOFF: "Списание",
+    db.KIND_PRODUCT_ADDED: "Товар заведён",
+    db.KIND_PRODUCT_EDITED: "Товар изменён",
+    db.KIND_PRODUCT_ARCHIVED: "Товар в архив",
+    db.KIND_PRODUCT_RESTORED: "Товар из архива",
+    db.KIND_PRODUCT_DELETED: "Товар удалён",
 }
 
-DEFAULT_KINDS = ["Толстовка", "Футболка", "Худи", "Свитшот", "Шопер", "Кепка"]
+# Причины прихода и расхода — из них собирается меню на кнопках + и −.
+PLUS_REASONS = [
+    {"kind": db.KIND_RECEIPT, "label": "Поставка", "hint": "пришла новая партия"},
+    {"kind": db.KIND_RETURN, "label": "Возврат", "hint": "покупатель вернул товар"},
+]
+MINUS_REASONS = [
+    {"kind": db.KIND_SALE, "label": "Продажа", "hint": "обычная продажа покупателю"},
+    {"kind": db.KIND_DEFECT, "label": "Брак", "hint": "товар испорчен и списан"},
+    {"kind": db.KIND_MISTAKE, "label": "Случайный клик", "hint": "лишняя единица, исправление"},
+]
+
+CATEGORY_LABELS = {db.CAT_CLOTHING: "Одежда", db.CAT_SOUVENIR: "Сувенирная продукция"}
+
+KIND_SUGGESTIONS = {
+    db.CAT_CLOTHING: ["Толстовка", "Футболка", "Худи", "Свитшот", "Шопер", "Кепка"],
+    db.CAT_SOUVENIR: ["Кружка", "Ручка", "Значок", "Блокнот", "Магнит", "Наклейка", "Термокружка"],
+}
+
+MATERIAL_SUGGESTIONS = [
+    "Хлопок 100%", "Хлопок 80% / полиэстер 20%", "Футер трёхнитка", "Футер двухнитка",
+    "Кулирка", "Полиэстер 100%",
+]
+
+WISH_STATUSES = [
+    {"id": "open", "label": "Ждёт"},
+    {"id": "notified", "label": "Клиенту сообщили"},
+    {"id": "closed", "label": "Закрыта"},
+]
+WISH_STATUS_LABELS = {s["id"]: s["label"] for s in WISH_STATUSES}
 
 LOW_STOCK_DEFAULT = 2
 DEAD_DAYS_DEFAULT = 30
@@ -36,21 +70,6 @@ class ApiError(Exception):
 
 # --- Вспомогательное -------------------------------------------------------
 
-def product_title(p):
-    """«Толстовка фиолетовая · большая печать» — как товар называется на карточке."""
-    parts = [p["kind"].strip()]
-    if p.get("color"):
-        parts.append(p["color"].strip())
-    title = " ".join(x for x in parts if x)
-    if p.get("print_name"):
-        title += " · " + p["print_name"].strip()
-    return title
-
-
-def _size_order(sizes):
-    return {s: i for i, s in enumerate(sizes)}
-
-
 def _int(value, default=0):
     try:
         return int(str(value).strip())
@@ -59,12 +78,10 @@ def _int(value, default=0):
 
 
 def _day_bounds(params):
-    """Возвращает (from_date, to_date) строками YYYY-MM-DD."""
     date_to = (params.get("to") or "").strip() or date.today().isoformat()
     date_from = (params.get("from") or "").strip()
     if not date_from:
-        days = _int(params.get("days"), 30)
-        days = max(1, min(days, 3650))
+        days = max(1, min(_int(params.get("days"), 30), 3650))
         date_from = (date.fromisoformat(date_to) - timedelta(days=days - 1)).isoformat()
     return date_from, date_to
 
@@ -77,11 +94,18 @@ def low_stock_threshold():
     return _int(db.get_setting("low_stock", LOW_STOCK_DEFAULT), LOW_STOCK_DEFAULT)
 
 
+def _category(value):
+    value = (value or "").strip()
+    return value if value in db.CATEGORIES else db.CAT_CLOTHING
+
+
 # --- Товары ----------------------------------------------------------------
 
 def list_products(include_archived=False):
     where = "" if include_archived else "WHERE archived = 0"
-    products = db.query("SELECT * FROM products %s ORDER BY kind, color, print_name" % where)
+    products = db.query(
+        "SELECT * FROM products %s ORDER BY category, kind, color, print_name" % where
+    )
     stock_rows = db.query("SELECT product_id, size, qty FROM stock")
     by_product = {}
     for row in stock_rows:
@@ -91,7 +115,17 @@ def list_products(include_archived=False):
         r["product_id"]: r["ts"]
         for r in db.query(
             "SELECT product_id, MAX(ts) AS ts FROM movements "
-            "WHERE kind = ? AND undone = 0 GROUP BY product_id",
+            "WHERE kind = ? AND undone = 0 AND deleted_at IS NULL AND product_id IS NOT NULL "
+            "GROUP BY product_id",
+            (db.KIND_SALE,),
+        )
+    }
+    unpunched = {
+        r["product_id"]: r["n"]
+        for r in db.query(
+            "SELECT product_id, COUNT(*) AS n FROM movements "
+            "WHERE kind = ? AND needs_punch = 1 AND punched = 0 AND undone = 0 "
+            "AND deleted_at IS NULL AND product_id IS NOT NULL GROUP BY product_id",
             (db.KIND_SALE,),
         )
     }
@@ -100,84 +134,131 @@ def list_products(include_archived=False):
     for p in products:
         sizes = db.parse_sizes(p["sizes"])
         qty_map = by_product.get(p["id"], {})
-        # Размеры, по которым остался товар, но их убрали из карточки — всё равно показываем.
         for extra in sorted(set(qty_map) - set(sizes)):
             sizes.append(extra)
+        if p["category"] == db.CAT_SOUVENIR:
+            sizes = sizes[:1] or [db.ONE_SIZE]
         rows = [{"size": s, "qty": qty_map.get(s, 0)} for s in sizes]
-        total = sum(r["qty"] for r in rows)
         out.append(
             {
                 "id": p["id"],
+                "category": p["category"],
                 "kind": p["kind"],
                 "color": p["color"],
                 "print_name": p["print_name"],
+                "material": p["material"],
                 "price": p["price"],
+                "name_1c": p["name_1c"],
+                "link": p["link"],
                 "note": p["note"],
                 "archived": bool(p["archived"]),
                 "created_at": p["created_at"],
-                "title": product_title(p),
+                "title": db.product_title(p),
                 "sizes": rows,
-                "total": total,
+                "total": sum(r["qty"] for r in rows),
                 "last_sale": last_sale.get(p["id"]),
+                "needs_1c": not (p["name_1c"] or "").strip(),
+                "unpunched": unpunched.get(p["id"], 0),
             }
         )
     return out
 
 
-def save_product(payload, product_id=None):
+def get_product(product_id):
+    row = db.query_one("SELECT * FROM products WHERE id = ?", (product_id,))
+    if row is None:
+        raise ApiError("Товар не найден", 404)
+    return row
+
+
+def save_product(payload, product_id=None, seller=""):
+    category = _category(payload.get("category"))
     kind = (payload.get("kind") or "").strip()
     if not kind:
-        raise ApiError("Укажите тип товара (например, «Толстовка»)")
+        raise ApiError("Укажите тип товара (например, «Толстовка» или «Кружка»)")
 
-    sizes = db.parse_sizes(payload.get("sizes"))
-    if not sizes:
-        raise ApiError("Укажите хотя бы один размер")
+    if category == db.CAT_SOUVENIR:
+        sizes = [db.ONE_SIZE]
+        material = ""
+    else:
+        sizes = db.parse_sizes(payload.get("sizes"))
+        if not sizes:
+            raise ApiError("Укажите хотя бы один размер")
+        material = (payload.get("material") or "").strip()
+
+    link = (payload.get("link") or "").strip()
+    if link and not link.startswith(("http://", "https://")):
+        link = "https://" + link
 
     fields = (
+        category,
         kind,
         (payload.get("color") or "").strip(),
         (payload.get("print_name") or "").strip(),
+        material,
         max(0, _int(payload.get("price"), 0)),
         ",".join(sizes),
+        (payload.get("name_1c") or "").strip(),
+        link,
         (payload.get("note") or "").strip(),
+    )
+    title = db.product_title(
+        {"kind": fields[1], "color": fields[2], "print_name": fields[3]}
     )
 
     if product_id is None:
         cur = db.execute(
-            "INSERT INTO products(kind, color, print_name, price, sizes, note, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO products(category, kind, color, print_name, material, price, sizes, "
+            "name_1c, link, note, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             fields + (db.now_iso(),),
         )
         product_id = cur.lastrowid
+        db.log_event(
+            db.KIND_PRODUCT_ADDED, product_id, title, seller,
+            "%s, %s" % (CATEGORY_LABELS[category], _sizes_note(category, sizes)),
+        )
     else:
-        if not db.query_one("SELECT id FROM products WHERE id = ?", (product_id,)):
-            raise ApiError("Товар не найден", 404)
+        get_product(product_id)
         db.execute(
-            "UPDATE products SET kind = ?, color = ?, print_name = ?, price = ?, "
-            "sizes = ?, note = ? WHERE id = ?",
+            "UPDATE products SET category = ?, kind = ?, color = ?, print_name = ?, "
+            "material = ?, price = ?, sizes = ?, name_1c = ?, link = ?, note = ? WHERE id = ?",
             fields + (product_id,),
         )
+        db.log_event(db.KIND_PRODUCT_EDITED, product_id, title, seller)
 
     db.sync_stock_rows(product_id, sizes)
     return product_id
 
 
-def archive_product(product_id, archived):
-    if not db.query_one("SELECT id FROM products WHERE id = ?", (product_id,)):
-        raise ApiError("Товар не найден", 404)
+def _sizes_note(category, sizes):
+    if category == db.CAT_SOUVENIR:
+        return "без размеров"
+    return "размеры " + ", ".join(sizes)
+
+
+def archive_product(product_id, archived, seller=""):
+    product = get_product(product_id)
     db.execute("UPDATE products SET archived = ? WHERE id = ?", (1 if archived else 0, product_id))
+    db.log_event(
+        db.KIND_PRODUCT_ARCHIVED if archived else db.KIND_PRODUCT_RESTORED,
+        product_id, db.product_title(product), seller,
+    )
 
 
-def delete_product(product_id):
+def delete_product(product_id, seller=""):
+    product = get_product(product_id)
     used = db.query_one(
-        "SELECT COUNT(*) AS n FROM movements WHERE product_id = ?", (product_id,)
+        "SELECT COUNT(*) AS n FROM movements WHERE product_id = ? AND delta <> 0", (product_id,)
     )
     if used and used["n"]:
         raise ApiError(
-            "По товару есть %d записей в журнале — его можно только убрать в архив" % used["n"]
+            "По товару есть %d операций в журнале — его можно только убрать в архив" % used["n"]
         )
+    title = db.product_title(product)
     db.execute("DELETE FROM stock WHERE product_id = ?", (product_id,))
     db.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    # product_id обнуляется внешним ключом, название остаётся снимком в записи.
+    db.log_event(db.KIND_PRODUCT_DELETED, None, title, seller)
 
 
 # --- Продавцы --------------------------------------------------------------
@@ -209,30 +290,45 @@ def set_seller_active(seller_id, active):
 
 # --- Операции --------------------------------------------------------------
 
+MOVE_KINDS = {r["kind"] for r in PLUS_REASONS} | {r["kind"] for r in MINUS_REASONS}
+
+
 def do_move(payload):
     product_id = _int(payload.get("product_id"), 0)
     size = (payload.get("size") or "").strip()
     delta = _int(payload.get("delta"), 0)
     kind = (payload.get("kind") or "").strip()
-    seller = (payload.get("seller") or "").strip()
-    note = (payload.get("note") or "").strip()
 
     if not size:
         raise ApiError("Не выбран размер")
+    if kind not in MOVE_KINDS:
+        raise ApiError("Не выбрана причина операции")
+    expected_sign = 1 if kind in {r["kind"] for r in PLUS_REASONS} else -1
+    if delta == 0 or (delta > 0) != (expected_sign > 0):
+        raise ApiError("Причина «%s» не совпадает с направлением операции" % KIND_LABELS[kind])
+
     try:
         movement_id, new_qty = db.apply_movement(
-            product_id, size, delta, kind, seller=seller, note=note
+            product_id, size, delta, kind,
+            seller=(payload.get("seller") or "").strip(),
+            note=(payload.get("note") or "").strip(),
         )
     except db.StockError as exc:
         raise ApiError(str(exc))
-    return {"movement_id": movement_id, "qty": new_qty}
+
+    mov = db.query_one("SELECT needs_punch FROM movements WHERE id = ?", (movement_id,))
+    return {
+        "movement_id": movement_id,
+        "qty": new_qty,
+        "needs_punch": bool(mov and mov["needs_punch"]),
+    }
 
 
 def do_receipt(payload):
-    """Приёмка партии: сразу несколько размеров одной модели."""
+    """Поставка: сразу несколько размеров одной модели."""
     product_id = _int(payload.get("product_id"), 0)
     seller = (payload.get("seller") or "").strip()
-    note = (payload.get("note") or "").strip() or "Приёмка партии"
+    note = (payload.get("note") or "").strip() or "Поставка"
     items = payload.get("items") or {}
     if not isinstance(items, dict):
         raise ApiError("Неверный формат партии")
@@ -251,7 +347,7 @@ def do_receipt(payload):
         applied.append({"size": str(size), "qty": new_qty, "added": qty, "movement_id": movement_id})
 
     if not applied:
-        raise ApiError("Не указано ни одной штуки к приёмке")
+        raise ApiError("Не указано ни одной штуки к поставке")
     return {"applied": applied, "total": sum(a["added"] for a in applied)}
 
 
@@ -272,17 +368,12 @@ def do_set_qty(payload):
         return {"qty": current, "movement_id": None}
 
     note = (payload.get("note") or "").strip() or "Инвентаризация: было %d, стало %d" % (
-        current,
-        target,
+        current, target,
     )
     try:
         movement_id, new_qty = db.apply_movement(
-            product_id,
-            size,
-            delta,
-            db.KIND_CORRECTION,
-            seller=(payload.get("seller") or "").strip(),
-            note=note,
+            product_id, size, delta, db.KIND_CORRECTION,
+            seller=(payload.get("seller") or "").strip(), note=note,
         )
     except db.StockError as exc:
         raise ApiError(str(exc))
@@ -290,64 +381,249 @@ def do_set_qty(payload):
 
 
 def do_undo(payload):
-    movement_id = _int(payload.get("movement_id"), 0)
     try:
-        qty = db.undo_movement(movement_id, seller=(payload.get("seller") or "").strip())
+        qty = db.undo_movement(
+            _int(payload.get("movement_id"), 0), seller=(payload.get("seller") or "").strip()
+        )
     except db.StockError as exc:
         raise ApiError(str(exc))
     return {"qty": qty}
 
 
-# --- Журнал ----------------------------------------------------------------
+# --- Журнал и корзина ------------------------------------------------------
 
 def list_movements(params):
-    where = ["1 = 1"]
+    trash = str(params.get("trash") or "") in ("1", "true")
+    where = ["deleted_at IS NOT NULL" if trash else "deleted_at IS NULL"]
     args = []
 
     if params.get("kind"):
-        where.append("m.kind = ?")
+        where.append("kind = ?")
         args.append(params["kind"])
+    if params.get("group") == "stock":
+        where.append("delta <> 0")
+    elif params.get("group") == "events":
+        where.append("delta = 0")
     if params.get("product_id"):
-        where.append("m.product_id = ?")
+        where.append("product_id = ?")
         args.append(_int(params["product_id"], 0))
     if params.get("seller"):
-        where.append("m.seller = ?")
+        where.append("seller = ?")
         args.append(params["seller"])
     if params.get("from"):
-        where.append("m.ts >= ?")
+        where.append("ts >= ?")
         args.append(params["from"] + " 00:00:00")
     if params.get("to"):
-        where.append("m.ts <= ?")
+        where.append("ts <= ?")
         args.append(params["to"] + " 23:59:59")
     if params.get("q"):
-        where.append(
-            "(p.kind LIKE ? OR p.color LIKE ? OR p.print_name LIKE ? OR m.note LIKE ? OR m.seller LIKE ?)"
-        )
+        where.append("(title LIKE ? OR note LIKE ? OR seller LIKE ? OR size LIKE ?)")
         needle = "%" + params["q"].strip() + "%"
-        args.extend([needle] * 5)
+        args.extend([needle] * 4)
 
     limit = max(1, min(_int(params.get("limit"), 100), 1000))
     offset = max(0, _int(params.get("offset"), 0))
+    clause = " AND ".join(where)
 
-    sql = (
-        "SELECT m.*, p.kind AS product_kind, p.color, p.print_name FROM movements m "
-        "JOIN products p ON p.id = m.product_id WHERE " + " AND ".join(where) +
-        " ORDER BY m.ts DESC, m.id DESC LIMIT ? OFFSET ?"
+    rows = db.query(
+        "SELECT * FROM movements WHERE %s ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?" % clause,
+        tuple(args) + (limit, offset),
     )
-    rows = db.query(sql, tuple(args) + (limit, offset))
     total = db.query_one(
-        "SELECT COUNT(*) AS n FROM movements m JOIN products p ON p.id = m.product_id WHERE "
-        + " AND ".join(where),
-        tuple(args),
+        "SELECT COUNT(*) AS n FROM movements WHERE %s" % clause, tuple(args)
     )["n"]
 
     for r in rows:
-        r["title"] = product_title(
-            {"kind": r["product_kind"], "color": r["color"], "print_name": r["print_name"]}
-        )
         r["kind_label"] = KIND_LABELS.get(r["kind"], r["kind"])
         r["amount"] = -r["delta"] * r["price"] if r["kind"] in db.REVENUE_KINDS else 0
-    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+        r["is_event"] = r["delta"] == 0
+        r["unpunched"] = bool(r["needs_punch"] and not r["punched"] and not r["undone"])
+    return {"items": rows, "total": total, "limit": limit, "offset": offset, "trash": trash}
+
+
+def trash_movement(payload):
+    """Убирает запись журнала в корзину. Живую запись — только вместе с откатом."""
+    movement_id = _int(payload.get("movement_id"), 0)
+    mov = db.query_one("SELECT * FROM movements WHERE id = ?", (movement_id,))
+    if mov is None:
+        raise ApiError("Запись не найдена", 404)
+    if mov["deleted_at"]:
+        raise ApiError("Запись уже в корзине")
+
+    active = mov["delta"] != 0 and not mov["undone"]
+    mode = (payload.get("mode") or "").strip()
+    if active and mode not in ("undo", "keep"):
+        raise ApiError(
+            "Запись ещё учтена в остатках: %s %+d шт. Откатить её перед удалением?"
+            % (mov["title"], mov["delta"])
+        )
+    if active and mode == "undo":
+        try:
+            db.undo_movement(movement_id, seller=(payload.get("seller") or "").strip())
+        except db.StockError as exc:
+            raise ApiError(str(exc))
+
+    db.execute("UPDATE movements SET deleted_at = ? WHERE id = ?", (db.now_iso(), movement_id))
+    return {"ok": True, "undone": active and mode == "undo"}
+
+
+def restore_movement(movement_id):
+    mov = db.query_one("SELECT id FROM movements WHERE id = ? AND deleted_at IS NOT NULL",
+                       (movement_id,))
+    if mov is None:
+        raise ApiError("Запись не найдена в корзине", 404)
+    db.execute("UPDATE movements SET deleted_at = NULL WHERE id = ?", (movement_id,))
+
+
+def purge_movement(movement_id):
+    mov = db.query_one("SELECT id FROM movements WHERE id = ? AND deleted_at IS NOT NULL",
+                       (movement_id,))
+    if mov is None:
+        raise ApiError("Запись не найдена в корзине", 404)
+    db.execute("DELETE FROM movements WHERE id = ?", (movement_id,))
+
+
+def empty_trash():
+    cur = db.execute("DELETE FROM movements WHERE deleted_at IS NOT NULL")
+    return cur.rowcount
+
+
+# --- Не пробитые в кассе ---------------------------------------------------
+
+def list_unpunched():
+    rows = db.query(
+        "SELECT * FROM movements WHERE kind = ? AND needs_punch = 1 AND punched = 0 "
+        "AND undone = 0 AND deleted_at IS NULL ORDER BY ts DESC",
+        (db.KIND_SALE,),
+    )
+    by_product = {}
+    by_seller = {}
+    for r in rows:
+        key = r["product_id"] if r["product_id"] is not None else "gone:" + r["title"]
+        group = by_product.setdefault(
+            key,
+            {"product_id": r["product_id"], "title": r["title"], "count": 0,
+             "amount": 0, "name_1c": "", "sellers": set()},
+        )
+        group["count"] += 1
+        group["amount"] += r["price"]
+        group["sellers"].add(r["seller"] or "без имени")
+        by_seller[r["seller"] or "без имени"] = by_seller.get(r["seller"] or "без имени", 0) + 1
+
+    products = {p["id"]: p for p in list_products(include_archived=True)}
+    groups = []
+    for group in by_product.values():
+        product = products.get(group["product_id"])
+        groups.append(
+            {
+                "product_id": group["product_id"],
+                "title": group["title"],
+                "count": group["count"],
+                "amount": group["amount"],
+                "name_1c": product["name_1c"] if product else "",
+                "has_1c": bool(product and not product["needs_1c"]),
+                "sellers": sorted(group["sellers"]),
+            }
+        )
+    groups.sort(key=lambda g: -g["count"])
+    return {
+        "items": rows,
+        "groups": groups,
+        "by_seller": sorted(by_seller.items(), key=lambda kv: -kv[1]),
+        "total": len(rows),
+        "amount": sum(r["price"] for r in rows),
+    }
+
+
+def mark_punched(payload):
+    """Отмечает продажи пробитыми: одну запись или все по товару."""
+    movement_id = _int(payload.get("movement_id"), 0)
+    product_id = _int(payload.get("product_id"), 0)
+    if movement_id:
+        row = db.query_one("SELECT id FROM movements WHERE id = ?", (movement_id,))
+        if row is None:
+            raise ApiError("Запись не найдена", 404)
+        db.execute("UPDATE movements SET punched = 1 WHERE id = ?", (movement_id,))
+        return {"marked": 1}
+    if product_id:
+        cur = db.execute(
+            "UPDATE movements SET punched = 1 WHERE product_id = ? AND kind = ? "
+            "AND needs_punch = 1 AND punched = 0 AND undone = 0 AND deleted_at IS NULL",
+            (product_id, db.KIND_SALE),
+        )
+        return {"marked": cur.rowcount}
+    raise ApiError("Не указано, что отмечать")
+
+
+# --- Желания ---------------------------------------------------------------
+
+def list_wishes(params=None):
+    params = params or {}
+    where = []
+    args = []
+    if params.get("status"):
+        where.append("status = ?")
+        args.append(params["status"])
+    elif not str(params.get("all") or "") in ("1", "true"):
+        where.append("status <> 'closed'")
+    if params.get("q"):
+        where.append("(product LIKE ? OR contact LIKE ? OR seller LIKE ? OR note LIKE ?)")
+        args.extend(["%" + params["q"].strip() + "%"] * 4)
+
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = db.query(
+        "SELECT * FROM wishes %s ORDER BY (status = 'closed'), asked_on DESC, id DESC" % clause,
+        tuple(args),
+    )
+    for r in rows:
+        r["status_label"] = WISH_STATUS_LABELS.get(r["status"], r["status"])
+    return rows
+
+
+def save_wish(payload, wish_id=None):
+    product = (payload.get("product") or "").strip()
+    if not product:
+        raise ApiError("Напишите, какой товар спрашивали")
+    asked_on = (payload.get("asked_on") or "").strip() or db.today_iso()
+    fields = (
+        asked_on,
+        product,
+        (payload.get("contact") or "").strip(),
+        (payload.get("seller") or "").strip(),
+        (payload.get("note") or "").strip(),
+    )
+    if wish_id is None:
+        cur = db.execute(
+            "INSERT INTO wishes(asked_on, product, contact, seller, note, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?)",
+            fields + (db.now_iso(),),
+        )
+        return cur.lastrowid
+    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+        raise ApiError("Заявка не найдена", 404)
+    db.execute(
+        "UPDATE wishes SET asked_on = ?, product = ?, contact = ?, seller = ?, note = ? "
+        "WHERE id = ?",
+        fields + (wish_id,),
+    )
+    return wish_id
+
+
+def set_wish_status(wish_id, status):
+    if status not in WISH_STATUS_LABELS:
+        raise ApiError("Неизвестный статус заявки")
+    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+        raise ApiError("Заявка не найдена", 404)
+    db.execute(
+        "UPDATE wishes SET status = ?, closed_at = ? WHERE id = ?",
+        (status, db.now_iso() if status == "closed" else None, wish_id),
+    )
+
+
+def delete_wish(wish_id):
+    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+        raise ApiError("Заявка не найдена", 404)
+    db.execute("DELETE FROM wishes WHERE id = ?", (wish_id,))
 
 
 # --- Отчёты ----------------------------------------------------------------
@@ -359,27 +635,28 @@ def build_reports(params):
     dead_days = max(1, _int(params.get("dead_days"), DEAD_DAYS_DEFAULT))
     low = low_stock_threshold()
     kind_filter = (params.get("kind") or "").strip()
+    category_filter = (params.get("category") or "").strip()
 
     products = {
         p["id"]: p
         for p in list_products(include_archived=True)
-        if not kind_filter or p["kind"] == kind_filter
+        if (not kind_filter or p["kind"] == kind_filter)
+        and (not category_filter or p["category"] == category_filter)
     }
 
-    # Все движения за период одним запросом — фильтры дальше применяем в Python.
     raw = db.query(
         "SELECT product_id, size, kind, SUM(delta) AS delta, SUM(-delta * price) AS amount, "
-        "COUNT(*) AS ops FROM movements WHERE undone = 0 AND ts BETWEEN ? AND ? "
-        "GROUP BY product_id, size, kind",
+        "COUNT(*) AS ops FROM movements WHERE undone = 0 AND deleted_at IS NULL "
+        "AND delta <> 0 AND ts BETWEEN ? AND ? GROUP BY product_id, size, kind",
         (ts_from, ts_to),
     )
     rows = [r for r in raw if r["product_id"] in products]
 
-    sold = {}           # (product_id, size) -> шт продано за вычетом возвратов
-    sold_amount = {}    # (product_id, size) -> выручка
+    sold = {}
+    sold_amount = {}
     sale_ops = sale_amount = sale_qty = 0
     return_qty = return_amount = 0
-    received_qty = 0
+    received_qty = defect_qty = 0
 
     for r in rows:
         key = (r["product_id"], r["size"])
@@ -395,14 +672,10 @@ def build_reports(params):
             return_amount += r["amount"]
         elif r["kind"] == db.KIND_RECEIPT:
             received_qty += r["delta"]
+        elif r["kind"] in (db.KIND_DEFECT, db.KIND_WRITEOFF):
+            defect_qty += -r["delta"]
 
-    stock_qty = sum(
-        s["qty"] for p in products.values() if not p["archived"] for s in p["sizes"]
-    )
-    stock_amount = sum(
-        s["qty"] * p["price"] for p in products.values() if not p["archived"] for s in p["sizes"]
-    )
-
+    live = [p for p in products.values() if not p["archived"]]
     summary = {
         "date_from": date_from,
         "date_to": date_to,
@@ -412,13 +685,13 @@ def build_reports(params):
         "sales_ops": sale_ops,
         "returned_qty": return_qty,
         "received_qty": received_qty,
+        "defect_qty": defect_qty,
         "avg_price": round(sale_amount / sale_ops) if sale_ops else 0,
-        "stock_qty": stock_qty,
-        "stock_amount": stock_amount,
+        "stock_qty": sum(s["qty"] for p in live for s in p["sizes"]),
+        "stock_amount": sum(s["qty"] * p["price"] for p in live for s in p["sizes"]),
         "per_day": round(sale_qty / days, 2),
     }
 
-    # Топ моделей.
     top = []
     for pid, product in products.items():
         qty = sum(v for (p_id, _), v in sold.items() if p_id == pid)
@@ -439,17 +712,14 @@ def build_reports(params):
         )
     top.sort(key=lambda r: (-r["sold"], -r["revenue"]))
 
-    # Залежавшиеся: есть остаток, но продаж давно (или совсем) не было.
     today = date.today()
     dead = []
     for product in products.values():
         if product["archived"] or product["total"] <= 0:
             continue
         last = product["last_sale"]
-        if last:
-            idle = (today - datetime.fromisoformat(last).date()).days
-        else:
-            idle = (today - datetime.fromisoformat(product["created_at"]).date()).days
+        anchor = last or product["created_at"]
+        idle = (today - datetime.fromisoformat(anchor).date()).days
         if idle >= dead_days:
             dead.append(
                 {
@@ -463,15 +733,14 @@ def build_reports(params):
             )
     dead.sort(key=lambda r: (-r["idle_days"], -r["stock"]))
 
-    # Какие размеры вымываются первыми. Числовые и буквенные ряды считаем раздельно —
-    # 46-й и M это разные шкалы, в одной таблице их сравнивать нельзя.
+    # Размеры считаем только по одежде и раздельно для числовых и буквенных рядов.
     scales = {}
     for (pid, size), qty in sold.items():
-        scales.setdefault(_scale_of(size), {}).setdefault(size, {"sold": 0, "stock": 0})[
-            "sold"
-        ] += qty
+        if products[pid]["category"] != db.CAT_CLOTHING:
+            continue
+        scales.setdefault(_scale_of(size), {}).setdefault(size, {"sold": 0, "stock": 0})["sold"] += qty
     for product in products.values():
-        if product["archived"]:
+        if product["archived"] or product["category"] != db.CAT_CLOTHING:
             continue
         for s in product["sizes"]:
             bucket = scales.setdefault(_scale_of(s["size"]), {})
@@ -500,7 +769,6 @@ def build_reports(params):
             )
         sizes_report.append({"scale": scale, "label": SCALE_LABELS[scale], "items": items})
 
-    # Что заказывать: размеры, которые продаются и вот-вот кончатся.
     restock = []
     for product in products.values():
         if product["archived"]:
@@ -517,7 +785,7 @@ def build_reports(params):
                 {
                     "product_id": product["id"],
                     "title": product["title"],
-                    "size": s["size"],
+                    "size": "" if product["category"] == db.CAT_SOUVENIR else s["size"],
                     "stock": s["qty"],
                     "sold": qty,
                     "days_left": days_left,
@@ -534,6 +802,7 @@ def build_reports(params):
         "restock": restock[:60],
         "dead_days": dead_days,
         "kind": kind_filter,
+        "category": category_filter,
     }
 
 
@@ -565,20 +834,19 @@ def _natural_size_key(size):
 def export_stock_csv():
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["Тип", "Цвет", "Принт", "Размер", "Остаток", "Цена", "Сумма"])
+    writer.writerow([
+        "Категория", "Тип", "Цвет", "Принт", "Материал", "Размер", "Остаток",
+        "Цена", "Сумма", "Наименование в 1С", "Ссылка",
+    ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
-            writer.writerow(
-                [
-                    product["kind"],
-                    product["color"],
-                    product["print_name"],
-                    s["size"],
-                    s["qty"],
-                    product["price"],
-                    s["qty"] * product["price"],
-                ]
-            )
+            writer.writerow([
+                CATEGORY_LABELS.get(product["category"], product["category"]),
+                product["kind"], product["color"], product["print_name"], product["material"],
+                "" if product["category"] == db.CAT_SOUVENIR else s["size"],
+                s["qty"], product["price"], s["qty"] * product["price"],
+                product["name_1c"], product["link"],
+            ])
     return buf.getvalue()
 
 
@@ -586,45 +854,77 @@ def export_movements_csv(params):
     data = list_movements(dict(params, limit=1000000))
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма", "Комментарий", "Отменено"])
+    writer.writerow([
+        "Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма",
+        "Комментарий", "Не пробито", "Отменено",
+    ])
     for row in data["items"]:
-        writer.writerow(
-            [
-                row["ts"],
-                row["kind_label"],
-                row["title"],
-                row["size"],
-                row["delta"],
-                row["seller"],
-                row["amount"],
-                row["note"],
-                "да" if row["undone"] else "",
-            ]
-        )
+        writer.writerow([
+            row["ts"], row["kind_label"], row["title"], row["size"],
+            row["delta"] or "", row["seller"], row["amount"], row["note"],
+            "да" if row["unpunched"] else "", "да" if row["undone"] else "",
+        ])
+    return buf.getvalue()
+
+
+def export_wishes_csv():
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
+    for w in list_wishes({"all": "1"}):
+        writer.writerow([
+            w["asked_on"], w["product"], w["contact"], w["seller"],
+            w["status_label"], w["note"],
+        ])
     return buf.getvalue()
 
 
 # --- Стартовые данные ------------------------------------------------------
 
 def bootstrap():
+    db.purge_trash_daily()
     products = list_products()
-    kinds = sorted({p["kind"] for p in products}) or []
-    colors = sorted({p["color"] for p in products if p["color"]})
-    prints = sorted({p["print_name"] for p in products if p["print_name"]})
+    kinds = sorted({p["kind"] for p in products})
     return {
         "products": products,
         "sellers": list_sellers(include_inactive=True),
         "facets": {
             "kinds": kinds,
-            "colors": colors,
-            "prints": prints,
-            "kind_suggestions": sorted(set(kinds) | set(DEFAULT_KINDS)),
+            "colors": sorted({p["color"] for p in products if p["color"]}),
+            "prints": sorted({p["print_name"] for p in products if p["print_name"]}),
+            "materials": sorted({p["material"] for p in products if p["material"]}),
+            "kind_suggestions": {
+                cat: sorted(set(names) | {p["kind"] for p in products if p["category"] == cat})
+                for cat, names in KIND_SUGGESTIONS.items()
+            },
+            "material_suggestions": sorted(
+                set(MATERIAL_SUGGESTIONS) | {p["material"] for p in products if p["material"]}
+            ),
         },
         "size_presets": SIZE_PRESETS,
         "kind_labels": KIND_LABELS,
+        "categories": CATEGORY_LABELS,
+        "plus_reasons": PLUS_REASONS,
+        "minus_reasons": MINUS_REASONS,
+        "wish_statuses": WISH_STATUSES,
         "settings": {
             "low_stock": low_stock_threshold(),
             "dead_days": _int(db.get_setting("dead_days", DEAD_DAYS_DEFAULT), DEAD_DAYS_DEFAULT),
+            "trash_days": db.TRASH_DAYS,
         },
-        "archived_count": db.query_one("SELECT COUNT(*) AS n FROM products WHERE archived = 1")["n"],
+        "counters": {
+            "unpunched": db.query_one(
+                "SELECT COUNT(*) AS n FROM movements WHERE kind = ? AND needs_punch = 1 "
+                "AND punched = 0 AND undone = 0 AND deleted_at IS NULL", (db.KIND_SALE,)
+            )["n"],
+            "wishes": db.query_one(
+                "SELECT COUNT(*) AS n FROM wishes WHERE status <> 'closed'"
+            )["n"],
+            "trash": db.query_one(
+                "SELECT COUNT(*) AS n FROM movements WHERE deleted_at IS NOT NULL"
+            )["n"],
+            "archived": db.query_one(
+                "SELECT COUNT(*) AS n FROM products WHERE archived = 1"
+            )["n"],
+        },
     }

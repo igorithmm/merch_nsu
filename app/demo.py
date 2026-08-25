@@ -5,16 +5,33 @@ from datetime import datetime, timedelta
 
 from . import api, db
 
+# category, kind, color, print, material, price, sizes, наименование в 1С, ссылка
 PRODUCTS = [
-    ("Толстовка", "фиолетовая", "большая печать", 4200, "42,44,46,48,50,52,54,56"),
-    ("Толстовка", "чёрная", "малый герб", 3900, "42,44,46,48,50,52,54,56"),
-    ("Футболка", "белая", "большая печать", 1500, "42,44,46,48,50,52,54,56"),
-    ("Футболка", "синяя", "надпись NSU", 1500, "42,44,46,48,50,52,54,56"),
-    ("Худи", "серая", "малый герб", 4500, "XS,S,M,L,XL,XXL"),
-    ("Свитшот", "бордовый", "большая печать", 3600, "42,44,46,48,50,52,54"),
+    (db.CAT_CLOTHING, "Толстовка", "фиолетовая", "большая печать", "Футер трёхнитка", 4200,
+     "42,44,46,48,50,52,54,56", "Толстовка НГУ фиолет. больш. принт", "https://store.nsu.ru/hoodie-purple"),
+    (db.CAT_CLOTHING, "Толстовка", "чёрная", "малый герб", "Футер трёхнитка", 3900,
+     "42,44,46,48,50,52,54,56", "", ""),
+    (db.CAT_CLOTHING, "Футболка", "белая", "большая печать", "Хлопок 100%", 1500,
+     "42,44,46,48,50,52,54,56", "Футболка НГУ белая больш. принт", "https://store.nsu.ru/tshirt-white"),
+    (db.CAT_CLOTHING, "Футболка", "синяя", "надпись NSU", "Хлопок 100%", 1500,
+     "42,44,46,48,50,52,54,56", "Футболка НГУ синяя NSU", ""),
+    (db.CAT_CLOTHING, "Худи", "серая", "малый герб", "Футер двухнитка", 4500,
+     "XS,S,M,L,XL,XXL", "", ""),
+    (db.CAT_SOUVENIR, "Кружка", "белая", "герб НГУ", "", 650, "",
+     "Кружка НГУ белая герб", "https://store.nsu.ru/mug-white"),
+    (db.CAT_SOUVENIR, "Ручка", "синяя", "логотип", "", 180, "", "Ручка НГУ синяя", ""),
+    (db.CAT_SOUVENIR, "Значок", "", "герб НГУ", "", 250, "", "", ""),
 ]
 
 SELLERS = ["Игорь", "Анна", "Максим"]
+
+WISHES = [
+    ("Толстовка фиолетовая, размер 58", "+7 913 000-11-22, Мария", "Игорь",
+     "Обещали позвонить, когда придёт поставка", "open", 4),
+    ("Худи серая XXL", "t.me/pavel_nsk", "Анна", "", "notified", 11),
+    ("Кружка с гербом, 5 штук на подарки", "kate@example.com", "Максим",
+     "Нужно к 20 числу", "open", 2),
+]
 
 
 def seed():
@@ -28,32 +45,38 @@ def seed():
     rng = random.Random(42)
     now = datetime.now()
 
-    for kind, color, print_name, price, sizes in PRODUCTS:
+    for category, kind, color, print_name, material, price, sizes, name_1c, link in PRODUCTS:
         product_id = api.save_product(
             {
+                "category": category,
                 "kind": kind,
                 "color": color,
                 "print_name": print_name,
+                "material": material,
                 "price": price,
                 "sizes": sizes,
-            }
+                "name_1c": name_1c,
+                "link": link,
+            },
+            seller=SELLERS[0],
         )
-        size_list = db.parse_sizes(sizes)
+        size_list = [db.ONE_SIZE] if category == db.CAT_SOUVENIR else db.parse_sizes(sizes)
+        title = "%s %s" % (kind, color)
 
-        # Приёмка партии два месяца назад.
+        # Поставка два месяца назад.
         received_at = (now - timedelta(days=60)).replace(microsecond=0).isoformat(sep=" ")
         for size in size_list:
-            qty = rng.randint(3, 12)
+            qty = rng.randint(12, 30) if category == db.CAT_SOUVENIR else rng.randint(3, 12)
             db.execute(
                 "INSERT INTO stock(product_id, size, qty) VALUES(?, ?, ?) "
                 "ON CONFLICT(product_id, size) DO UPDATE SET qty = excluded.qty",
                 (product_id, size, qty),
             )
             db.execute(
-                "INSERT INTO movements(ts, product_id, size, delta, kind, seller, price, note) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                (received_at, product_id, size, qty, db.KIND_RECEIPT, SELLERS[0], price,
-                 "Приёмка партии"),
+                "INSERT INTO movements(ts, product_id, title, size, delta, kind, seller, price, note) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (received_at, product_id, title, size, qty, db.KIND_RECEIPT, SELLERS[0],
+                 price, "Поставка"),
             )
 
         # Продажи за последние 60 дней: ходовые размеры уходят чаще.
@@ -71,18 +94,26 @@ def seed():
                 (product_id, size),
             )
             db.execute(
-                "INSERT INTO movements(ts, product_id, size, delta, kind, seller, price, note) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO movements(ts, product_id, title, size, delta, kind, seller, price, "
+                "note, needs_punch) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    sold_at.replace(microsecond=0).isoformat(sep=" "),
-                    product_id,
-                    size,
-                    -1,
-                    db.KIND_SALE,
-                    rng.choice(SELLERS),
-                    price,
-                    "",
+                    sold_at.replace(microsecond=0).isoformat(sep=" "), product_id, title, size,
+                    -1, db.KIND_SALE, rng.choice(SELLERS), price, "",
+                    0 if name_1c else 1,
                 ),
             )
+
+    for product, contact, seller, note, status, days_ago in WISHES:
+        wish_id = api.save_wish(
+            {
+                "product": product,
+                "contact": contact,
+                "seller": seller,
+                "note": note,
+                "asked_on": (now - timedelta(days=days_ago)).date().isoformat(),
+            }
+        )
+        if status != "open":
+            api.set_wish_status(wish_id, status)
 
     return len(PRODUCTS)

@@ -14,13 +14,6 @@
     <span class="topbar__mark">НГУ</span>
     <span class="topbar__name">Мерч<span class="topbar__sub">учёт товара</span></span>
   </div>
-
-  <div class="modes" id="modes" role="group" aria-label="Режим работы">
-    <button class="mode" data-mode="sale"><span class="mode__ico">₽</span>Продажа</button>
-    <button class="mode" data-mode="receipt"><span class="mode__ico">↓</span>Приёмка</button>
-    <button class="mode" data-mode="fix"><span class="mode__ico">✎</span>Коррекция</button>
-  </div>
-
   <div class="topbar__right">
     <label class="seller">
       <span class="seller__label">Смена</span>
@@ -30,11 +23,11 @@
   </div>
 </header>
 
-<div class="mode-banner" id="modeBanner"></div>
-
 <nav class="tabs" id="tabs">
   <button class="tab" data-tab="stock">Остатки</button>
+  <button class="tab" data-tab="punch">Не пробито<span class="badge" data-badge="unpunched"></span></button>
   <button class="tab" data-tab="journal">Журнал</button>
+  <button class="tab" data-tab="wishes">Желания<span class="badge badge--calm" data-badge="wishes"></span></button>
   <button class="tab" data-tab="reports">Отчёты</button>
   <button class="tab" data-tab="catalog">Товары</button>
   <button class="tab" data-tab="settings">Настройки</button>
@@ -46,7 +39,7 @@
     <div class="toolbar">
       <div class="search">
         <span class="search__ico">⌕</span>
-        <input id="search" type="search" placeholder="Поиск: толстовка фиолетовая, герб…" autocomplete="off">
+        <input id="search" type="search" placeholder="Поиск: толстовка фиолетовая, кружка, герб…" autocomplete="off">
         <kbd class="search__kbd">/</kbd>
       </div>
       <div class="filters" id="filters"></div>
@@ -56,6 +49,11 @@
     <div class="grid" id="productGrid"></div>
   </section>
 
+  <!-- НЕ ПРОБИТО -->
+  <section class="view" id="view-punch" hidden>
+    <div id="punchBody"></div>
+  </section>
+
   <!-- ЖУРНАЛ -->
   <section class="view" id="view-journal" hidden>
     <div class="toolbar toolbar--wrap">
@@ -63,6 +61,11 @@
         <span class="search__ico">⌕</span>
         <input id="journalSearch" type="search" placeholder="Товар, продавец, комментарий…" autocomplete="off">
       </div>
+      <select id="journalGroup" class="select">
+        <option value="">Всё подряд</option>
+        <option value="stock">Движение товара</option>
+        <option value="events">Справочник</option>
+      </select>
       <select id="journalKind" class="select"></select>
       <select id="journalSeller" class="select"></select>
       <label class="field field--inline">с <input type="date" id="journalFrom"></label>
@@ -70,7 +73,9 @@
       <button class="btn btn--ghost" id="journalReset">Сбросить</button>
       <a class="btn btn--ghost" id="journalExport" href="/api/export/movements.csv">Выгрузить CSV</a>
       <span id="journalFocus"></span>
+      <label class="switch"><input type="checkbox" id="journalTrash"><span></span>Корзина<span class="badge badge--calm" data-badge="trash"></span></label>
     </div>
+    <div class="trash-note" id="trashNote" hidden></div>
     <div class="table-wrap">
       <table class="table" id="journalTable">
         <thead>
@@ -86,6 +91,46 @@
     <div class="pager" id="journalPager"></div>
   </section>
 
+  <!-- ЖЕЛАНИЯ -->
+  <section class="view" id="view-wishes" hidden>
+    <div class="panel">
+      <h2 class="panel__title">Новое желание</h2>
+      <p class="panel__hint">Что спрашивали, но чего не было в наличии. Пригодится при заказе партии и чтобы перезвонить клиенту.</p>
+      <form id="wishForm">
+        <div class="field3">
+          <label class="field">Товар
+            <input type="text" id="wProduct" placeholder="Толстовка фиолетовая, размер 58" required></label>
+          <label class="field">Дата обращения
+            <input type="date" id="wDate"></label>
+          <label class="field">Контакты клиента
+            <input type="text" id="wContact" placeholder="телефон, телеграм, почта"></label>
+          <label class="field">Продавец
+            <select id="wSeller"></select></label>
+        </div>
+        <label class="field">Комментарий
+          <input type="text" id="wNote" placeholder="например: нужно к 20 числу"></label>
+        <button class="btn btn--primary" type="submit">Записать желание</button>
+      </form>
+    </div>
+    <div class="toolbar">
+      <div class="search search--sm">
+        <span class="search__ico">⌕</span>
+        <input id="wishSearch" type="search" placeholder="Поиск по желаниям…" autocomplete="off">
+      </div>
+      <select id="wishStatus" class="select"></select>
+      <a class="btn btn--ghost" href="/api/export/wishes.csv">Выгрузить CSV</a>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Дата</th><th>Товар</th><th>Контакты</th><th>Продавец</th>
+              <th>Комментарий</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody id="wishBody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ОТЧЁТЫ -->
   <section class="view" id="view-reports" hidden>
     <div class="toolbar">
@@ -97,6 +142,7 @@
       </div>
       <label class="field field--inline">с <input type="date" id="repFrom"></label>
       <label class="field field--inline">по <input type="date" id="repTo"></label>
+      <select id="repCategory" class="select"></select>
       <select id="repKind" class="select"></select>
       <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
     </div>
@@ -106,14 +152,16 @@
   <!-- ТОВАРЫ -->
   <section class="view" id="view-catalog" hidden>
     <div class="toolbar">
-      <button class="btn btn--primary" id="addProduct">+ Новая модель</button>
+      <button class="btn btn--primary" id="addClothing">+ Новая одежда</button>
+      <button class="btn btn--primary" id="addSouvenir">+ Новый сувенир</button>
       <label class="switch"><input type="checkbox" id="showArchived"><span></span>Показывать архив</label>
     </div>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>Модель</th><th>Тип</th><th>Цвет</th><th>Принт</th><th class="ta-r">Цена</th>
-              <th class="ta-c">Размеры</th><th class="ta-c">Остаток</th><th></th></tr>
+          <tr><th>Модель</th><th>Категория</th><th>Материал</th><th class="ta-r">Цена</th>
+              <th class="ta-c">Размеры</th><th class="ta-c">Остаток</th>
+              <th>Наименование в 1С</th><th></th></tr>
         </thead>
         <tbody id="catalogBody"></tbody>
       </table>
@@ -144,21 +192,28 @@
         <button class="btn btn--primary" id="saveSettings">Сохранить</button>
       </div>
       <div class="panel">
-        <h2 class="panel__title">Завершение работы</h2>
-        <p class="panel__hint">Данные сохраняются сразу после каждой операции — закрывать можно в любой момент. Чтобы открыть приложение снова, дважды щёлкните по ярлыку «Запустить».</p>
-        <button class="btn btn--danger" id="shutdownBtn">Завершить работу</button>
-      </div>
-      <div class="panel">
         <h2 class="panel__title">Данные</h2>
         <p class="panel__hint">База лежит в файле <code>data/merch.db</code> рядом с программой. Копируйте его, чтобы сделать бэкап.</p>
         <div class="row">
           <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>
+          <a class="btn btn--ghost" href="/api/export/wishes.csv">Желания в CSV</a>
         </div>
+      </div>
+      <div class="panel">
+        <h2 class="panel__title">Завершение работы</h2>
+        <p class="panel__hint">Данные сохраняются сразу после каждой операции — закрывать можно в любой момент. Чтобы открыть приложение снова, дважды щёлкните по ярлыку «Запустить».</p>
+        <button class="btn btn--danger" id="shutdownBtn">Завершить работу</button>
       </div>
     </div>
   </section>
 </main>
+
+<div class="pop" id="pop" hidden>
+  <div class="pop__title" id="popTitle"></div>
+  <label class="pop__qty">Штук <input type="number" id="popQty" min="1" value="1"></label>
+  <div class="pop__list" id="popList"></div>
+</div>
 
 <div class="toasts" id="toasts"></div>
 
