@@ -909,20 +909,19 @@ def export_stock_csv():
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
     writer.writerow([
-        "Категория", "Тип", "Цвет", "Принт", "Материал", "Размер", "Остаток",
+        "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
         "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
-        "Снят с продажи", "Ссылка",
+        "Снят с продажи",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
             writer.writerow([
                 CATEGORY_LABELS.get(product["category"], product["category"]),
-                product["kind"], product["color"], product["print_name"], product["material"],
+                product["kind"], product["color"], product["print_name"],
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
                 s["qty"], product["price"], s["qty"] * product["price"],
                 product["name_1c"], s["alt_1c"],
                 "да" if (product["blocked"] or s["blocked"]) else "",
-                product["link"],
             ])
     return buf.getvalue()
 
