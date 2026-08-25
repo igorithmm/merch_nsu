@@ -83,10 +83,13 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TEXT NOT NULL
 );
 
+-- alt_1c — пересорт: этот размер продаётся в кассе под другим наименованием 1С.
 CREATE TABLE IF NOT EXISTS stock (
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     size       TEXT NOT NULL,
     qty        INTEGER NOT NULL DEFAULT 0,
+    alt_1c     TEXT NOT NULL DEFAULT '',
+    alt_note   TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (product_id, size)
 );
 
@@ -107,6 +110,7 @@ CREATE TABLE IF NOT EXISTS movements (
     undone      INTEGER NOT NULL DEFAULT 0,
     needs_punch INTEGER NOT NULL DEFAULT 0,
     punched     INTEGER NOT NULL DEFAULT 0,
+    sold_as     TEXT NOT NULL DEFAULT '',
     deleted_at  TEXT
 );
 
@@ -151,20 +155,36 @@ def _columns(conn, table):
     return {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
 
 
-def _migrate(conn):
-    """Доводит базу прошлой версии до текущей схемы, не теряя данных."""
-    new_product_columns = [
+NEW_COLUMNS = {
+    "products": [
         ("category", "TEXT NOT NULL DEFAULT 'clothing'"),
         ("material", "TEXT NOT NULL DEFAULT ''"),
         ("name_1c", "TEXT NOT NULL DEFAULT ''"),
         ("link", "TEXT NOT NULL DEFAULT ''"),
-    ]
-    have = _columns(conn, "products")
-    for name, ddl in new_product_columns:
-        if name not in have:
-            conn.execute("ALTER TABLE products ADD COLUMN %s %s" % (name, ddl))
+    ],
+    "stock": [
+        ("alt_1c", "TEXT NOT NULL DEFAULT ''"),
+        ("alt_note", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "movements": [
+        ("sold_as", "TEXT NOT NULL DEFAULT ''"),
+    ],
+}
 
+
+def _add_missing_columns(conn, table):
+    have = _columns(conn, table)
+    for name, ddl in NEW_COLUMNS.get(table, []):
+        if name not in have:
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, ddl))
+
+
+def _migrate(conn):
+    """Доводит базу прошлой версии до текущей схемы, не теряя данных."""
+    _add_missing_columns(conn, "products")
     if "deleted_at" in _columns(conn, "movements"):
+        _add_missing_columns(conn, "stock")
+        _add_missing_columns(conn, "movements")
         return
 
     # Журнал перестраиваем: товар в записи стал необязательным (чтобы история
@@ -187,6 +207,7 @@ def _migrate(conn):
         """
     )
     conn.execute("DROP TABLE movements_old")
+    _add_missing_columns(conn, "stock")
 
 
 def connect():
@@ -287,6 +308,16 @@ def sync_stock_rows(product_id, sizes):
         conn.commit()
 
 
+def set_size_override(product_id, size, alt_1c, alt_note=""):
+    """Пересорт: этот размер продаётся в кассе под другим наименованием 1С."""
+    execute(
+        "INSERT INTO stock(product_id, size, qty, alt_1c, alt_note) VALUES(?, ?, 0, ?, ?) "
+        "ON CONFLICT(product_id, size) DO UPDATE SET alt_1c = excluded.alt_1c, "
+        "alt_note = excluded.alt_note",
+        (product_id, size, alt_1c.strip(), alt_note.strip()),
+    )
+
+
 # --- Журнал ----------------------------------------------------------------
 
 class StockError(Exception):
@@ -319,16 +350,21 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
             raise StockError("Товар не найден")
 
         row = conn.execute(
-            "SELECT qty FROM stock WHERE product_id = ? AND size = ?", (product_id, size)
+            "SELECT qty, alt_1c FROM stock WHERE product_id = ? AND size = ?", (product_id, size)
         ).fetchone()
         current = row["qty"] if row else 0
         new_qty = current + delta
         if new_qty < 0 and not allow_negative:
             raise StockError("На складе %d шт — списать %d нельзя" % (current, -delta))
 
-        # Продажу товара без наименования в 1С нельзя пробить в кассе сразу:
+        # Под каким наименованием товар уходит через кассу: пересорт по размеру
+        # важнее общего наименования товара.
+        alt_1c = ((row["alt_1c"] if row else "") or "").strip()
+        sold_as = alt_1c or (product["name_1c"] or "").strip()
+
+        # Продажу товара, которого нет в 1С, нельзя пробить в кассе сразу:
         # помечаем, чтобы не забыть сделать это позже.
-        needs_punch = 1 if (kind == KIND_SALE and not (product["name_1c"] or "").strip()) else 0
+        needs_punch = 1 if (kind == KIND_SALE and not sold_as) else 0
 
         conn.execute(
             "INSERT INTO stock(product_id, size, qty) VALUES(?, ?, ?) "
@@ -337,10 +373,11 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
         )
         cur = conn.execute(
             "INSERT INTO movements(ts, product_id, title, size, delta, kind, seller, price, "
-            "note, needs_punch) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "note, needs_punch, sold_as) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now_iso(), product_id, product_title(dict(product)), size, delta, kind,
                 seller, product["price"], note, needs_punch,
+                sold_as if kind == KIND_SALE else "",
             ),
         )
         conn.commit()

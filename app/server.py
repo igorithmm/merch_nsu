@@ -174,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if route == "trash/empty":
                 return self._json({"removed": api.empty_trash()})
+            if route == "overrides":
+                return self._json(api.save_overrides(body))
             if route == "punched":
                 return self._json(api.mark_punched(body))
             if route == "wishes":

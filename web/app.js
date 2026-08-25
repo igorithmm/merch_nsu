@@ -9,6 +9,7 @@ const state = {
              product_id: '', trash: false },
   wishes: { q: '', status: '' },
   report: { days: 30, from: '', to: '', kind: '', category: '', data: null },
+  sort: localStorage.getItem('merch.sort') || 'title',
   showArchived: false,
 };
 
@@ -137,8 +138,12 @@ function openReasonPopover(anchor, product, size, direction) {
   popContext = { product, size, direction };
 
   const label = isSouvenir(product) ? product.title : `${product.title}, размер ${size}`;
+  const row = product.sizes.find((s) => s.size === size);
+  const alt = row && (row.alt_1c || '').trim();
   $('#popTitle').innerHTML =
-    `<b>${direction > 0 ? 'Прибавить' : 'Убавить'}</b> · ${esc(label)}`;
+    `<b>${direction > 0 ? 'Прибавить' : 'Убавить'}</b> · ${esc(label)}`
+    + (alt ? `<div class="pop__alt"><b>Пересорт.</b> Пробивать в кассе как:<br>${esc(alt)}
+              ${row.alt_note ? `<span class="muted">${esc(row.alt_note)}</span>` : ''}</div>` : '');
   $('#popQty').value = 1;
   $('#popList').innerHTML = reasons.map((r) => `
     <button class="pop__item" data-kind="${r.kind}">
@@ -175,7 +180,10 @@ async function applyReason(kind) {
     applyQty(product.id, size, res.qty, direction);
     const label = state.data.kind_labels[kind];
     const where = isSouvenir(product) ? product.title : `${product.title}, ${size}`;
+    const row = product.sizes.find((s) => s.size === size);
+    const alt = kind === 'sale' && row && (row.alt_1c || '').trim();
     toast(`${esc(label)}: <b>${esc(where)}</b> ${direction > 0 ? '+' : '−'}${qty} · осталось ${res.qty}`
+      + (alt ? ` <span class="toast__warn">пробить как: ${esc(alt)}</span>` : '')
       + (res.needs_punch ? ' <span class="toast__warn">не пробито в кассе</span>' : ''),
       { kind: direction > 0 ? 'ok' : 'sale', undoId: qty === 1 ? res.movement_id : null });
     if (res.needs_punch) refreshCounters();
@@ -289,7 +297,13 @@ function visibleProducts() {
       if (!needle.split(/\s+/).every((word) => hay.includes(word))) return false;
     }
     return true;
-  });
+  }).sort(sortComparator());
+}
+
+function sortComparator() {
+  if (state.sort === 'price_asc') return (a, b) => a.price - b.price || a.title.localeCompare(b.title, 'ru');
+  if (state.sort === 'price_desc') return (a, b) => b.price - a.price || a.title.localeCompare(b.title, 'ru');
+  return (a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title, 'ru');
 }
 
 function renderFilters() {
@@ -342,7 +356,7 @@ function renderStock() {
     <span><span class="dot" style="background:var(--warn)"></span>≤ ${low} шт — пора заказывать</span>
     ${state.filters.sizes.length
       ? `<span><b>${state.filters.sizes.join(', ')}</b> — показаны только эти размеры</span>` : ''}
-    <span class="legend__tip">Тап по числу — продажа 1 шт. Кнопки − и + спросят причину.</span>` : '';
+    <span class="legend__tip">Кнопки − и + под числом спросят причину операции.</span>` : '';
 
   if (!state.data.products.length) {
     grid.innerHTML = `<div class="empty">
@@ -363,11 +377,14 @@ function renderStock() {
 }
 
 function tile(product, s, low, showLabel) {
+  const alt = (s.alt_1c || '').trim();
+  const where = `${esc(product.title)}${showLabel ? ', размер ' + esc(s.size) : ''}`;
   return `
-    <div class="size ${sizeClass(s.qty, low)}" data-product="${product.id}" data-size="${esc(s.size)}">
+    <div class="size ${sizeClass(s.qty, low)} ${alt ? 'size--alt' : ''}"
+         data-product="${product.id}" data-size="${esc(s.size)}"
+         ${alt ? `title="Пересорт — продавать в кассе как: ${esc(alt)}"` : ''}>
       ${showLabel ? `<div class="size__label">${esc(s.size)}</div>` : ''}
-      <button class="size__qty" data-act="sell"
-              title="Продать 1 шт" aria-label="${esc(product.title)}${showLabel ? ', размер ' + esc(s.size) : ''}: ${s.qty} шт">${s.qty}</button>
+      <div class="size__qty" aria-label="${where}: ${s.qty} шт">${s.qty}${alt ? '<span class="size__alt">1С</span>' : ''}</div>
       <div class="size__ctl">
         <button data-act="minus" title="Убавить: продажа, брак, случайный клик" ${s.qty <= 0 ? 'disabled' : ''}>−</button>
         <button data-act="plus" title="Прибавить: поставка, возврат">+</button>
@@ -391,6 +408,7 @@ function renderCard(p) {
     p.needs_1c ? '<span class="tag tag--warn" title="У товара не заполнено наименование в 1С">Нет в 1С</span>' : '',
     p.unpunched ? `<span class="tag tag--danger" data-punch="${p.id}" role="button"
         title="Продажи, которые ещё не пробиты в кассе">${p.unpunched} не пробито</span>` : '',
+    p.overrides ? `<span class="tag tag--alt" title="Размеры, которые пробиваются под другим наименованием 1С">Пересорт: ${p.overrides}</span>` : '',
   ].join('');
 
   return `<article class="card ${p.total === 0 ? 'is-empty' : ''}">
@@ -419,6 +437,7 @@ function renderCard(p) {
     <div class="card__foot">
       ${souvenir ? '' : `<button class="btn btn--sm" data-batch="${p.id}">Поставка партии</button>`}
       <button class="btn btn--sm" data-batch="${p.id}" data-inventory="1">Пересчитать</button>
+      <button class="btn btn--sm ${p.overrides ? 'btn--alt' : ''}" data-alt="${p.id}">Пересорт в 1С</button>
       <button class="btn btn--ghost btn--sm" data-history="${p.id}">История</button>
       <button class="btn btn--ghost btn--sm" data-edit-stock="${p.id}">Карточка</button>
     </div>
@@ -448,23 +467,6 @@ function applyQty(productId, size, qty, direction) {
     card.classList.toggle('is-empty', product.total === 0);
     const total = card.querySelector('.card__total');
     if (total) total.textContent = `всего ${pcs(product.total)}`;
-  }
-}
-
-async function sellOne(tileEl) {
-  const productId = Number(tileEl.dataset.product);
-  const size = tileEl.dataset.size;
-  const product = state.data.products.find((p) => p.id === productId);
-  try {
-    const res = await apiPost('/api/move', { product_id: productId, size, delta: -1, kind: 'sale' });
-    applyQty(productId, size, res.qty, -1);
-    const where = isSouvenir(product) ? product.title : `${product.title}, размер ${size}`;
-    toast(`Продано: <b>${esc(where)}</b> · осталось ${res.qty}`
-      + (res.needs_punch ? ' <span class="toast__warn">не пробито в кассе</span>' : ''),
-      { kind: 'sale', undoId: res.movement_id });
-    if (res.needs_punch) refreshCounters();
-  } catch (err) {
-    toast(err.message, { kind: 'err' });
   }
 }
 
@@ -523,6 +525,52 @@ function openBatch(productId, inventory = false) {
               await reload();
               toast(`Принято ${pcs(res.total)}: <b>${esc(product.title)}</b>`, { kind: 'ok' });
             }
+          } catch (err) { toast(err.message, { kind: 'err' }); }
+        },
+      },
+    ],
+  });
+}
+
+function openOverrides(productId) {
+  const product = state.data.products.find((p) => p.id === productId);
+  if (!product) return;
+  const souvenir = isSouvenir(product);
+  const rows = product.sizes.map((s) => `
+    <div class="altrow">
+      <span class="altrow__size">${souvenir ? 'Весь товар' : esc(s.size)}</span>
+      <input type="text" data-size="${esc(s.size)}" value="${esc(s.alt_1c || '')}"
+             placeholder="как пробивать в кассе (пусто — как обычно)">
+      <input type="text" data-note="${esc(s.size)}" value="${esc(s.alt_note || '')}"
+             placeholder="примечание" class="altrow__note">
+    </div>`).join('');
+
+  openModal({
+    title: `Пересорт в 1С: ${product.title}`,
+    body: `<p class="hint">Если из-за пересорта размер приходится пробивать под другим
+        наименованием 1С — впишите его здесь. Пустое поле означает, что товар пробивается
+        как обычно${product.name_1c ? `: <b>${esc(product.name_1c)}</b>` : ' (наименование товара не заполнено)'}.</p>
+      <div class="altlist">${rows}</div>
+      <p class="hint">Такой размер помечается на карточке, а перед списанием приложение
+         напомнит, под каким именем его пробивать.</p>`,
+    buttons: [
+      { label: 'Отмена', onClick: (close) => close() },
+      {
+        label: 'Сохранить', className: 'btn--primary',
+        onClick: async (close) => {
+          const items = {};
+          $$('#modalBody .altrow').forEach((r) => {
+            const name = r.querySelector('[data-size]');
+            const note = r.querySelector('[data-note]');
+            items[name.dataset.size] = { name_1c: name.value, note: note.value };
+          });
+          try {
+            const res = await apiPost('/api/overrides', { product_id: productId, items });
+            close();
+            await reload();
+            toast(res.changed.length
+              ? `Пересорт сохранён: ${res.changed.join(', ')}`
+              : 'Пересорт снят со всех размеров');
           } catch (err) { toast(err.message, { kind: 'err' }); }
         },
       },
@@ -630,7 +678,8 @@ async function loadJournal() {
         <td class="num muted" style="white-space:nowrap">${fmtDateTime(m.ts)}</td>
         <td><span class="pill pill--${PILL[m.kind] || 'correction'}">${esc(m.kind_label)}</span>
             ${m.unpunched ? '<span class="tag tag--danger">не пробито</span>' : ''}</td>
-        <td>${esc(m.title) || '<span class="muted">—</span>'}</td>
+        <td>${esc(m.title) || '<span class="muted">—</span>'}
+            ${m.sold_as ? `<span class="tag tag--alt" title="Под этим наименованием продано в 1С">1С: ${esc(m.sold_as)}</span>` : ''}</td>
         <td class="ta-c num">${m.size === '—' ? '' : esc(m.size)}</td>
         <td class="ta-c num" style="font-weight:650;color:${m.delta < 0 ? 'var(--danger)' : m.delta > 0 ? 'var(--ok)' : 'var(--text-faint)'}">
           ${m.delta ? (m.delta > 0 ? '+' : '') + m.delta : '·'}</td>
@@ -1043,6 +1092,11 @@ function bind() {
     state.filters[sel.dataset.filter] = sel.value;
     renderStock();
   });
+  $('#sortBy').addEventListener('change', (e) => {
+    state.sort = e.target.value;
+    localStorage.setItem('merch.sort', state.sort);
+    renderStock();
+  });
   $('#resetFilters').addEventListener('click', () => {
     state.filters = { q: '', category: '', kind: '', color: '', print: '', sizes: [], lowOnly: false, no1c: false };
     $('#search').value = '';
@@ -1065,6 +1119,8 @@ function bind() {
     if (punch) return setTab('punch');
     const batch = e.target.closest('[data-batch]');
     if (batch) return openBatch(Number(batch.dataset.batch), batch.dataset.inventory === '1');
+    const alt = e.target.closest('[data-alt]');
+    if (alt) return openOverrides(Number(alt.dataset.alt));
     const editStock = e.target.closest('[data-edit-stock]');
     if (editStock) {
       const p = state.data.products.find((x) => x.id === Number(editStock.dataset.editStock));
@@ -1084,7 +1140,6 @@ function bind() {
     const tileEl = actBtn.closest('.size');
     if (!tileEl) return;
     const product = state.data.products.find((p) => p.id === Number(tileEl.dataset.product));
-    if (actBtn.dataset.act === 'sell') return sellOne(tileEl);
     openReasonPopover(actBtn, product, tileEl.dataset.size, actBtn.dataset.act === 'plus' ? 1 : -1);
   });
 
@@ -1379,6 +1434,7 @@ async function init() {
     Object.entries(state.data.kind_labels).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#repTo').value = today();
   $('#wDate').value = today();
+  $('#sortBy').value = state.sort;
 
   if (!state.seller) {
     const first = state.data.sellers.find((s) => s.active);

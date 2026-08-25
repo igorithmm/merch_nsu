@@ -106,10 +106,10 @@ def list_products(include_archived=False):
     products = db.query(
         "SELECT * FROM products %s ORDER BY category, kind, color, print_name" % where
     )
-    stock_rows = db.query("SELECT product_id, size, qty FROM stock")
+    stock_rows = db.query("SELECT product_id, size, qty, alt_1c, alt_note FROM stock")
     by_product = {}
     for row in stock_rows:
-        by_product.setdefault(row["product_id"], {})[row["size"]] = row["qty"]
+        by_product.setdefault(row["product_id"], {})[row["size"]] = row
 
     last_sale = {
         r["product_id"]: r["ts"]
@@ -138,7 +138,17 @@ def list_products(include_archived=False):
             sizes.append(extra)
         if p["category"] == db.CAT_SOUVENIR:
             sizes = sizes[:1] or [db.ONE_SIZE]
-        rows = [{"size": s, "qty": qty_map.get(s, 0)} for s in sizes]
+        rows = []
+        for size in sizes:
+            cell = qty_map.get(size) or {}
+            rows.append(
+                {
+                    "size": size,
+                    "qty": cell.get("qty", 0),
+                    "alt_1c": cell.get("alt_1c", ""),
+                    "alt_note": cell.get("alt_note", ""),
+                }
+            )
         out.append(
             {
                 "id": p["id"],
@@ -159,6 +169,7 @@ def list_products(include_archived=False):
                 "last_sale": last_sale.get(p["id"]),
                 "needs_1c": not (p["name_1c"] or "").strip(),
                 "unpunched": unpunched.get(p["id"], 0),
+                "overrides": sum(1 for r in rows if r["alt_1c"]),
             }
         )
     return out
@@ -259,6 +270,38 @@ def delete_product(product_id, seller=""):
     db.execute("DELETE FROM products WHERE id = ?", (product_id,))
     # product_id обнуляется внешним ключом, название остаётся снимком в записи.
     db.log_event(db.KIND_PRODUCT_DELETED, None, title, seller)
+
+
+def save_overrides(payload):
+    """Пересорт: у каких размеров товара своё наименование в 1С."""
+    product_id = _int(payload.get("product_id"), 0)
+    product = get_product(product_id)
+    items = payload.get("items") or {}
+    if not isinstance(items, dict):
+        raise ApiError("Неверный формат пересорта")
+
+    known = set(db.parse_sizes(product["sizes"])) | {
+        r["size"] for r in db.query("SELECT size FROM stock WHERE product_id = ?", (product_id,))
+    }
+    changed = []
+    for size, value in items.items():
+        size = str(size)
+        if size not in known:
+            continue
+        if isinstance(value, dict):
+            alt_1c, alt_note = value.get("name_1c") or "", value.get("note") or ""
+        else:
+            alt_1c, alt_note = value or "", ""
+        db.set_size_override(product_id, size, str(alt_1c), str(alt_note))
+        if str(alt_1c).strip():
+            changed.append(size)
+
+    db.log_event(
+        db.KIND_PRODUCT_EDITED, product_id, db.product_title(product),
+        (payload.get("seller") or "").strip(),
+        "Пересорт: %s" % (", ".join(changed) if changed else "снят со всех размеров"),
+    )
+    return {"changed": changed}
 
 
 # --- Продавцы --------------------------------------------------------------
@@ -437,6 +480,7 @@ def list_movements(params):
         r["kind_label"] = KIND_LABELS.get(r["kind"], r["kind"])
         r["amount"] = -r["delta"] * r["price"] if r["kind"] in db.REVENUE_KINDS else 0
         r["is_event"] = r["delta"] == 0
+        r["sold_as"] = r.get("sold_as") or ""
         r["unpunched"] = bool(r["needs_punch"] and not r["punched"] and not r["undone"])
     return {"items": rows, "total": total, "limit": limit, "offset": offset, "trash": trash}
 
@@ -836,7 +880,7 @@ def export_stock_csv():
     writer = csv.writer(buf, delimiter=";")
     writer.writerow([
         "Категория", "Тип", "Цвет", "Принт", "Материал", "Размер", "Остаток",
-        "Цена", "Сумма", "Наименование в 1С", "Ссылка",
+        "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как", "Ссылка",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
@@ -845,7 +889,7 @@ def export_stock_csv():
                 product["kind"], product["color"], product["print_name"], product["material"],
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
                 s["qty"], product["price"], s["qty"] * product["price"],
-                product["name_1c"], product["link"],
+                product["name_1c"], s["alt_1c"], product["link"],
             ])
     return buf.getvalue()
 
@@ -856,12 +900,12 @@ def export_movements_csv(params):
     writer = csv.writer(buf, delimiter=";")
     writer.writerow([
         "Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма",
-        "Комментарий", "Не пробито", "Отменено",
+        "Продано в 1С как", "Комментарий", "Не пробито", "Отменено",
     ])
     for row in data["items"]:
         writer.writerow([
             row["ts"], row["kind_label"], row["title"], row["size"],
-            row["delta"] or "", row["seller"], row["amount"], row["note"],
+            row["delta"] or "", row["seller"], row["amount"], row["sold_as"], row["note"],
             "да" if row["unpunched"] else "", "да" if row["undone"] else "",
         ])
     return buf.getvalue()
@@ -932,6 +976,9 @@ def bootstrap():
             )["n"],
             "archived": db.query_one(
                 "SELECT COUNT(*) AS n FROM products WHERE archived = 1"
+            )["n"],
+            "overrides": db.query_one(
+                "SELECT COUNT(*) AS n FROM stock WHERE alt_1c <> ''"
             )["n"],
         },
     }
