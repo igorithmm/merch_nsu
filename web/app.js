@@ -4,25 +4,69 @@ const state = {
   data: null,
   tab: 'stock',
   seller: localStorage.getItem('merch.seller') || '',
-  filters: { q: '', category: '', kind: '', color: '', print: '', sizes: [], lowOnly: false, no1c: false },
+  filters: { q: '', category: '', kind: '', color: '', print: '', sizes: [],
+             lowOnly: false, no1c: false, blocked: false },
   journal: { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '', from: '', to: '',
              product_id: '', trash: false },
   wishes: { q: '', status: '' },
   report: { days: 30, from: '', to: '', kind: '', category: '', data: null },
   sort: localStorage.getItem('merch.sort') || 'title',
+  view: localStorage.getItem('merch.view') || 'grid',
   showArchived: false,
 };
 
-const SWATCHES = {
-  'фиолетовая': '#7c4dcc', 'фиолетовый': '#7c4dcc', 'сиреневая': '#a98ae0',
-  'чёрная': '#20242c', 'черная': '#20242c', 'чёрный': '#20242c', 'черный': '#20242c',
-  'белая': '#f2f4f8', 'белый': '#f2f4f8', 'серая': '#9aa3b0', 'серый': '#9aa3b0',
-  'синяя': '#2456b8', 'синий': '#2456b8', 'голубая': '#5aa9e6', 'тёмно-синяя': '#16326b',
-  'красная': '#cf3030', 'красный': '#cf3030', 'бордовая': '#7d1f2e', 'бордовый': '#7d1f2e',
-  'зелёная': '#2c8a52', 'зеленая': '#2c8a52', 'зелёный': '#2c8a52',
-  'жёлтая': '#e5b52c', 'желтая': '#e5b52c', 'бежевая': '#d8c6a8', 'розовая': '#e28ab4',
-  'оранжевая': '#e07a2b', 'хаки': '#6b7042', 'мятная': '#7fd0b8',
-};
+// Цвет полоски на карточке. Ключ — основа слова без окончания, поэтому
+// «фиолетовый», «фиолетовая» и «фиолетовые» дают один и тот же оттенок.
+const SWATCHES = [
+  // белые и молочные
+  ['белоснежн', '#ffffff'], ['бел', '#f4f6fa'], ['молочн', '#f7efe0'],
+  ['кремов', '#f2e6cf'], ['слонов', '#f4efe2'], ['экрю', '#e8e0d0'],
+  ['ванильн', '#f6ecc9'], ['айвори', '#f4efe2'],
+  // бежевые и коричневые
+  ['бежев', '#d9c7a7'], ['песочн', '#ddc9a3'], ['капучино', '#a8825f'],
+  ['верблюжь', '#b98b5a'], ['карамельн', '#c68a4e'], ['кофейн', '#6b4c33'],
+  ['шоколадн', '#5a3a26'], ['коричнев', '#7a5230'], ['горчичн', '#cf9e2b'],
+  // серые и чёрные
+  ['светло-сер', '#c3c9d2'], ['тёмно-сер', '#6a7280'], ['темно-сер', '#6a7280'],
+  ['сер', '#9aa3b0'], ['меланж', '#b9bfc9'], ['графит', '#3a3f47'],
+  ['антрацит', '#2b2f36'], ['угольн', '#2a2d33'], ['мокрый асфальт', '#4a5058'],
+  ['чёрн', '#20242c'], ['черн', '#20242c'], ['серебр', '#c0c6cf'],
+  // синие и голубые
+  ['тёмно-син', '#16326b'], ['темно-син', '#16326b'], ['джинсов', '#3f5d8a'],
+  ['васильков', '#4c74d9'], ['индиго', '#2a2f7a'], ['небесн', '#7cc0ef'],
+  ['голуб', '#5aa9e6'], ['син', '#2456b8'], ['лазурн', '#2f97d4'],
+  // бирюза, морская волна, мята
+  ['морская волна', '#2e9d9a'], ['морской волны', '#2e9d9a'], ['морск', '#2e9d9a'],
+  ['бирюзов', '#1fb6b0'], ['аквамарин', '#6fd3c4'], ['мятн', '#7fd0b8'],
+  ['изумрудн', '#1f8a5b'], ['тиффани', '#4fc3c0'],
+  // зелёные
+  ['тёмно-зелён', '#1d5c38'], ['темно-зелен', '#1d5c38'], ['салатов', '#86c740'],
+  ['оливков', '#7a8a3a'], ['болотн', '#5c6b3c'], ['хаки', '#6b7042'],
+  ['фисташков', '#a8c46a'], ['зелён', '#2c8a52'], ['зелен', '#2c8a52'],
+  // жёлтые и оранжевые
+  ['лимонн', '#e8d84a'], ['золот', '#c9a227'], ['жёлт', '#e5b52c'], ['желт', '#e5b52c'],
+  ['персиков', '#f0b48a'], ['абрикосов', '#f0a862'], ['оранжев', '#e07a2b'],
+  ['терракот', '#b5573a'], ['коралл', '#f0765e'],
+  // красные и бордовые
+  ['алы', '#d92b2b'], ['красн', '#cf3030'], ['вишнёв', '#8f1d33'], ['вишнев', '#8f1d33'],
+  ['бордов', '#7d1f2e'], ['марсала', '#7b3644'], ['малинов', '#b3195a'],
+  // розовые и фиолетовые
+  ['фуксия', '#e0218a'], ['фукси', '#e0218a'], ['пыльная роза', '#c48a92'],
+  ['пудров', '#e6bcc3'], ['розов', '#e28ab4'], ['лилов', '#b57edc'],
+  ['лаванд', '#b7a5e0'], ['сиренев', '#a98ae0'], ['фиолетов', '#7c4dcc'],
+  ['пурпурн', '#7a2f7a'], ['баклажан', '#4a2340'], ['слив', '#5d3a6b'],
+  // на всякий случай английские названия
+  ['white', '#f4f6fa'], ['black', '#20242c'], ['grey', '#9aa3b0'], ['gray', '#9aa3b0'],
+  ['navy', '#16326b'], ['blue', '#2456b8'], ['teal', '#2e9d9a'], ['green', '#2c8a52'],
+  ['red', '#cf3030'], ['pink', '#e28ab4'], ['purple', '#7c4dcc'], ['beige', '#d9c7a7'],
+].sort((a, b) => b[0].length - a[0].length);   // длинные основы проверяем первыми
+
+function swatchFor(color) {
+  const s = String(color || '').toLowerCase().trim();
+  if (!s) return 'var(--border-strong)';
+  const hit = SWATCHES.find(([stem]) => s.startsWith(stem) || s.includes(' ' + stem));
+  return hit ? hit[1] : 'var(--border-strong)';
+}
 
 const PILL = {
   sale: 'sale', return: 'return', receipt: 'receipt', defect: 'defect',
@@ -134,22 +178,33 @@ function closeModal() { $('#modal').hidden = true; }
 let popContext = null;
 
 function openReasonPopover(anchor, product, size, direction) {
-  const reasons = direction > 0 ? state.data.plus_reasons : state.data.minus_reasons;
+  const row = product.sizes.find((s) => s.size === size) || {};
+  const alt = (row.alt_1c || '').trim();
+  const stop = product.blocked
+    ? (product.block_note || 'товар снят с продажи')
+    : (row.blocked ? (row.block_note || 'размер снят с продажи') : '');
   popContext = { product, size, direction };
 
   const label = isSouvenir(product) ? product.title : `${product.title}, размер ${size}`;
-  const row = product.sizes.find((s) => s.size === size);
-  const alt = row && (row.alt_1c || '').trim();
-  $('#popTitle').innerHTML =
-    `<b>${direction > 0 ? 'Прибавить' : 'Убавить'}</b> · ${esc(label)}`
+  const head = direction > 0 ? 'Прибавить' : direction < 0 ? 'Убавить' : 'Изменить остаток';
+  $('#popTitle').innerHTML = `<b>${esc(head)}</b> · ${esc(label)}`
+    + (stop ? `<div class="pop__stop"><b>Снят с продажи.</b> ${esc(stop)}</div>` : '')
     + (alt ? `<div class="pop__alt"><b>Пересорт.</b> Пробивать в кассе как:<br>${esc(alt)}
               ${row.alt_note ? `<span class="muted">${esc(row.alt_note)}</span>` : ''}</div>` : '');
   $('#popQty').value = 1;
-  $('#popList').innerHTML = reasons.map((r) => `
-    <button class="pop__item" data-kind="${r.kind}">
+
+  const item = (r) => {
+    const off = stop && r.kind === 'sale';
+    return `<button class="pop__item ${off ? 'is-off' : ''}" data-kind="${r.kind}" ${off ? 'disabled' : ''}>
       <span class="pop__label">${esc(r.label)}</span>
-      <span class="pop__hint">${esc(r.hint)}</span>
-    </button>`).join('');
+      <span class="pop__hint">${off ? 'недоступно: товар снят с продажи' : esc(r.hint)}</span>
+    </button>`;
+  };
+  const group = (title, list) => `<div class="pop__group">${title}</div>` + list.map(item).join('');
+
+  $('#popList').innerHTML = direction === 0
+    ? group('Списать', state.data.minus_reasons) + group('Добавить', state.data.plus_reasons)
+    : (direction > 0 ? state.data.plus_reasons : state.data.minus_reasons).map(item).join('');
 
   const pop = $('#pop');
   pop.hidden = false;
@@ -170,7 +225,9 @@ function closePopover() {
 
 async function applyReason(kind) {
   if (!popContext) return;
-  const { product, size, direction } = popContext;
+  const { product, size } = popContext;
+  const plus = state.data.plus_reasons.some((r) => r.kind === kind);
+  const direction = plus ? 1 : -1;
   const qty = Math.max(1, Number($('#popQty').value) || 1);
   closePopover();
   try {
@@ -291,6 +348,7 @@ function visibleProducts() {
     // Фильтр по размерам — про одежду: сувенирку он прячет.
     if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
     if (f.no1c && !p.needs_1c) return false;
+    if (f.blocked && !p.blocked && !p.blocked_sizes) return false;
     if (f.lowOnly && !shownSizes(p).some((s) => s.qty <= low)) return false;
     if (needle) {
       const hay = `${p.kind} ${p.color} ${p.print_name} ${p.material} ${p.note} ${p.name_1c}`.toLowerCase();
@@ -322,7 +380,8 @@ function renderFilters() {
     + sel('color', 'Любой цвет', facets.colors, f.color)
     + sel('print', 'Любой принт', facets.prints, f.print)
     + `<button class="chip chip--danger ${f.lowOnly ? 'is-active' : ''}" data-filter="lowOnly">Заканчивается</button>`
-    + `<button class="chip chip--warn ${f.no1c ? 'is-active' : ''}" data-filter="no1c">Нет в 1С</button>`;
+    + `<button class="chip chip--warn ${f.no1c ? 'is-active' : ''}" data-filter="no1c">Нет в 1С</button>`
+    + `<button class="chip chip--stop ${f.blocked ? 'is-active' : ''}" data-filter="blocked">Снято с продажи</button>`;
 
   // Размеры — отдельной строкой, выбирать можно сразу несколько.
   const sizes = facets.sizes || [];
@@ -335,7 +394,7 @@ function renderFilters() {
     ${f.sizes.length ? '<button class="chip chip--clear" data-size-filter="__clear">Все размеры</button>' : ''}` : '';
 
   $('#resetFilters').hidden = !(f.category || f.kind || f.color || f.print
-    || f.sizes.length || f.lowOnly || f.no1c || f.q);
+    || f.sizes.length || f.lowOnly || f.no1c || f.blocked || f.q);
 }
 
 function sizeClass(qty, low) {
@@ -373,18 +432,61 @@ function renderStock() {
     return;
   }
 
-  grid.innerHTML = items.map(renderCard).join('');
+  grid.className = state.view === 'list' ? 'rows' : 'grid';
+  grid.innerHTML = state.view === 'list'
+    ? items.map(renderRow).join('')
+    : items.map(renderCard).join('');
+}
+
+function renderRow(p) {
+  const low = state.data.settings.low_stock;
+  const rows = shownSizes(p);
+  const souvenir = isSouvenir(p);
+  const cells = rows.map((s) => {
+    const stop = p.blocked || s.blocked;
+    const hint = [
+      souvenir ? p.title : `размер ${s.size}`,
+      s.alt_1c ? 'пересорт: ' + s.alt_1c : '',
+      s.blocked ? 'снят с продажи' : '',
+    ].filter(Boolean).join(' · ');
+    return `<button class="scell ${sizeClass(s.qty, low)} ${s.alt_1c ? 'scell--alt' : ''} ${stop ? 'scell--stop' : ''}"
+        data-product="${p.id}" data-size="${esc(s.size)}" data-act="both" title="${esc(hint)}">
+      ${souvenir ? '' : `<span class="scell__size">${esc(s.size)}</span>`}
+      <b>${s.qty}</b></button>`;
+  }).join('');
+
+  return `<div class="rowitem ${p.blocked ? 'is-stopped' : ''} ${p.total === 0 ? 'is-empty' : ''}">
+    <span class="rowitem__dot" style="background:${swatchFor(p.color)}"></span>
+    <div class="rowitem__main">
+      <span class="rowitem__title">${esc(p.title)}</span>
+      ${p.blocked ? '<span class="tag tag--stop">снят с продажи</span>' : ''}
+      ${!p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">стоп: ${p.blocked_sizes}</span>` : ''}
+      ${p.needs_1c ? '<span class="tag tag--warn">нет в 1С</span>' : ''}
+      ${p.overrides ? '<span class="tag tag--alt">пересорт</span>' : ''}
+    </div>
+    <span class="rowitem__price">${money(p.price)}</span>
+    <span class="rowitem__total" title="Всего на складе">${p.total}</span>
+    <div class="rowitem__sizes">${cells}</div>
+    <button class="icon-btn icon-btn--sm" data-edit-stock="${p.id}" title="Карточка товара">⋯</button>
+  </div>`;
 }
 
 function tile(product, s, low, showLabel) {
   const alt = (s.alt_1c || '').trim();
+  const stop = product.blocked || s.blocked;
   const where = `${esc(product.title)}${showLabel ? ', размер ' + esc(s.size) : ''}`;
+  const hints = [
+    alt ? 'Пересорт — продавать в кассе как: ' + alt : '',
+    s.blocked ? 'Снят с продажи' + (s.block_note ? ': ' + s.block_note : '') : '',
+  ].filter(Boolean).join('\n');
   return `
-    <div class="size ${sizeClass(s.qty, low)} ${alt ? 'size--alt' : ''}"
+    <div class="size ${sizeClass(s.qty, low)} ${alt ? 'size--alt' : ''} ${stop ? 'size--stop' : ''}"
          data-product="${product.id}" data-size="${esc(s.size)}"
-         ${alt ? `title="Пересорт — продавать в кассе как: ${esc(alt)}"` : ''}>
+         ${hints ? `title="${esc(hints)}"` : ''}>
       ${showLabel ? `<div class="size__label">${esc(s.size)}</div>` : ''}
-      <div class="size__qty" aria-label="${where}: ${s.qty} шт">${s.qty}${alt ? '<span class="size__alt">1С</span>' : ''}</div>
+      <div class="size__qty" aria-label="${where}: ${s.qty} шт">${s.qty}
+        ${alt ? '<span class="size__alt">1С</span>' : ''}
+        ${s.blocked ? '<span class="size__stop" title="Размер снят с продажи">стоп</span>' : ''}</div>
       <div class="size__ctl">
         <button data-act="minus" title="Убавить: продажа, брак, случайный клик" ${s.qty <= 0 ? 'disabled' : ''}>−</button>
         <button data-act="plus" title="Прибавить: поставка, возврат">+</button>
@@ -394,7 +496,7 @@ function tile(product, s, low, showLabel) {
 
 function renderCard(p) {
   const low = state.data.settings.low_stock;
-  const swatch = SWATCHES[(p.color || '').toLowerCase()] || 'var(--border-strong)';
+  const swatch = swatchFor(p.color);
   const souvenir = isSouvenir(p);
   const rows = shownSizes(p);
   const partial = !souvenir && rows.length < p.sizes.length;
@@ -409,9 +511,11 @@ function renderCard(p) {
     p.unpunched ? `<span class="tag tag--danger" data-punch="${p.id}" role="button"
         title="Продажи, которые ещё не пробиты в кассе">${p.unpunched} не пробито</span>` : '',
     p.overrides ? `<span class="tag tag--alt" title="Размеры, которые пробиваются под другим наименованием 1С">Пересорт: ${p.overrides}</span>` : '',
+    p.blocked ? `<span class="tag tag--stop">Снят с продажи${p.block_note ? ': ' + esc(p.block_note) : ''}</span>` : '',
+    !p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">Снято с продажи размеров: ${p.blocked_sizes}</span>` : '',
   ].join('');
 
-  return `<article class="card ${p.total === 0 ? 'is-empty' : ''}">
+  return `<article class="card ${p.total === 0 ? 'is-empty' : ''} ${p.blocked ? 'is-stopped' : ''}">
     <div class="card__head">
       <div class="card__swatch" style="background:${swatch}"></div>
       <div class="card__main">
@@ -437,7 +541,8 @@ function renderCard(p) {
     <div class="card__foot">
       ${souvenir ? '' : `<button class="btn btn--sm" data-batch="${p.id}">Поставка партии</button>`}
       <button class="btn btn--sm" data-batch="${p.id}" data-inventory="1">Пересчитать</button>
-      <button class="btn btn--sm ${p.overrides ? 'btn--alt' : ''}" data-alt="${p.id}">Пересорт в 1С</button>
+      <button class="btn btn--sm ${p.overrides || p.blocked_sizes ? 'btn--alt' : ''}" data-alt="${p.id}"
+              title="Пересорт в 1С и запрет продажи по размерам">Отметки размеров</button>
       <button class="btn btn--ghost btn--sm" data-history="${p.id}">История</button>
       <button class="btn btn--ghost btn--sm" data-edit-stock="${p.id}">Карточка</button>
     </div>
@@ -453,21 +558,44 @@ function applyQty(productId, size, qty, direction) {
     if (row) row.qty = qty; else product.sizes.push({ size, qty });
     product.total = product.sizes.reduce((sum, s) => sum + s.qty, 0);
   }
-  const tileEl = $(`.size[data-product="${productId}"][data-size="${CSS.escape(size)}"]`);
+  // Перерисовываем только изменившуюся ячейку — и в плитках, и в списке.
+  const sel = `[data-product="${productId}"][data-size="${CSS.escape(size)}"]`;
+  const tileEl = $(`.size${sel}`);
   if (tileEl) {
-    tileEl.querySelector('.size__qty').textContent = qty;
-    tileEl.className = `size ${sizeClass(qty, state.data.settings.low_stock)}`;
+    const box = tileEl.querySelector('.size__qty');
+    box.childNodes[0].nodeValue = qty;
+    tileEl.classList.remove('size--zero', 'size--low');
+    const cls = sizeClass(qty, state.data.settings.low_stock);
+    if (cls) tileEl.classList.add(cls);
     tileEl.querySelector('[data-act="minus"]').disabled = qty <= 0;
-    void tileEl.offsetWidth;
-    tileEl.classList.add(direction < 0 ? 'flash-down' : 'flash-up');
-    setTimeout(() => tileEl.classList.remove('flash-down', 'flash-up'), 460);
+    flash(tileEl, direction);
   }
+  const cell = $(`.scell${sel}`);
+  if (cell) {
+    cell.querySelector('b').textContent = qty;
+    cell.classList.remove('size--zero', 'size--low');
+    const cls = sizeClass(qty, state.data.settings.low_stock);
+    if (cls) cell.classList.add(cls);
+    flash(cell, direction);
+  }
+
   const card = tileEl && tileEl.closest('.card');
   if (card && product) {
     card.classList.toggle('is-empty', product.total === 0);
     const total = card.querySelector('.card__total');
     if (total) total.textContent = `всего ${pcs(product.total)}`;
   }
+  const rowEl = cell && cell.closest('.rowitem');
+  if (rowEl && product) {
+    rowEl.classList.toggle('is-empty', product.total === 0);
+    rowEl.querySelector('.rowitem__total').textContent = product.total;
+  }
+}
+
+function flash(el, direction) {
+  void el.offsetWidth;
+  el.classList.add(direction < 0 ? 'flash-down' : 'flash-up');
+  setTimeout(() => el.classList.remove('flash-down', 'flash-up'), 460);
 }
 
 /* ---------- Поставка партии и пересчёт ---------- */
@@ -532,45 +660,58 @@ function openBatch(productId, inventory = false) {
   });
 }
 
-function openOverrides(productId) {
+function openMarks(productId) {
   const product = state.data.products.find((p) => p.id === productId);
   if (!product) return;
   const souvenir = isSouvenir(product);
   const rows = product.sizes.map((s) => `
-    <div class="altrow">
-      <span class="altrow__size">${souvenir ? 'Весь товар' : esc(s.size)}</span>
+    <div class="markrow ${s.blocked ? 'is-stopped' : ''}">
+      <span class="markrow__size">${souvenir ? 'Весь товар' : esc(s.size)}</span>
+      <label class="markrow__stop" title="Временно не продавать этот размер">
+        <input type="checkbox" data-block="${esc(s.size)}" ${s.blocked ? 'checked' : ''}>
+        <span>не продавать</span>
+      </label>
+      <input type="text" data-blocknote="${esc(s.size)}" value="${esc(s.block_note || '')}"
+             placeholder="почему снят" class="markrow__note">
       <input type="text" data-size="${esc(s.size)}" value="${esc(s.alt_1c || '')}"
-             placeholder="как пробивать в кассе (пусто — как обычно)">
+             placeholder="пересорт: как пробивать в кассе">
       <input type="text" data-note="${esc(s.size)}" value="${esc(s.alt_note || '')}"
-             placeholder="примечание" class="altrow__note">
+             placeholder="примечание к пересорту" class="markrow__note">
     </div>`).join('');
 
   openModal({
-    title: `Пересорт в 1С: ${product.title}`,
-    body: `<p class="hint">Если из-за пересорта размер приходится пробивать под другим
-        наименованием 1С — впишите его здесь. Пустое поле означает, что товар пробивается
-        как обычно${product.name_1c ? `: <b>${esc(product.name_1c)}</b>` : ' (наименование товара не заполнено)'}.</p>
-      <div class="altlist">${rows}</div>
-      <p class="hint">Такой размер помечается на карточке, а перед списанием приложение
-         напомнит, под каким именем его пробивать.</p>`,
+    title: `Отметки размеров: ${product.title}`,
+    body: `<p class="hint"><b>Не продавать</b> — размер временно снят с продажи: приход и
+        списание брака остаются доступны, а продажу приложение не даст провести.<br>
+        <b>Пересорт</b> — размер пробивается в кассе под другим наименованием 1С.
+        Пустое поле означает, что товар пробивается как обычно${
+          product.name_1c ? `: <b>${esc(product.name_1c)}</b>` : ' (наименование товара не заполнено)'}.</p>
+      <div class="marklist">${rows}</div>
+      <p class="hint">Чтобы снять с продажи весь товар целиком, поставьте флажок
+         в его карточке — кнопка «Карточка».</p>`,
     buttons: [
       { label: 'Отмена', onClick: (close) => close() },
       {
         label: 'Сохранить', className: 'btn--primary',
         onClick: async (close) => {
           const items = {};
-          $$('#modalBody .altrow').forEach((r) => {
+          $$('#modalBody .markrow').forEach((r) => {
             const name = r.querySelector('[data-size]');
-            const note = r.querySelector('[data-note]');
-            items[name.dataset.size] = { name_1c: name.value, note: note.value };
+            items[name.dataset.size] = {
+              name_1c: name.value,
+              note: r.querySelector('[data-note]').value,
+              blocked: r.querySelector('[data-block]').checked,
+              block_note: r.querySelector('[data-blocknote]').value,
+            };
           });
           try {
-            const res = await apiPost('/api/overrides', { product_id: productId, items });
+            const res = await apiPost('/api/marks', { product_id: productId, items });
             close();
             await reload();
-            toast(res.changed.length
-              ? `Пересорт сохранён: ${res.changed.join(', ')}`
-              : 'Пересорт снят со всех размеров');
+            const parts = [];
+            if (res.overrides.length) parts.push('пересорт: ' + res.overrides.join(', '));
+            if (res.blocked.length) parts.push('снято с продажи: ' + res.blocked.join(', '));
+            toast(parts.length ? 'Отметки сохранены — ' + parts.join('; ') : 'Отметки сняты');
           } catch (err) { toast(err.message, { kind: 'err' }); }
         },
       },
@@ -907,6 +1048,8 @@ async function renderCatalog() {
     <tr style="${p.archived ? 'opacity:.55' : ''}">
       <td style="font-weight:600">${esc(p.title)}
         ${p.archived ? '<span class="tag">архив</span>' : ''}
+        ${p.blocked ? `<span class="tag tag--stop">снят с продажи</span>` : ''}
+        ${!p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">стоп: ${p.blocked_sizes}</span>` : ''}
         ${p.link ? `<a class="card__link" href="${esc(p.link)}" target="_blank" rel="noopener">↗</a>` : ''}</td>
       <td>${esc(state.data.categories[p.category] || p.category)}</td>
       <td class="muted">${esc(p.material) || '—'}</td>
@@ -973,6 +1116,16 @@ function openProductForm(product, category) {
       </label>
       <p class="hint">Пока наименования нет, каждая продажа этого товара помечается как «не пробито в кассе» и попадает на вкладку «Не пробито».</p>
 
+      <label class="check">
+        <input type="checkbox" id="pBlocked" ${product?.blocked ? 'checked' : ''}>
+        <span>Снят с продажи целиком</span>
+      </label>
+      <label class="field">Почему снят с продажи
+        <input type="text" id="pBlockNote" placeholder="например: ждём переоценку"
+               value="${esc(product?.block_note || '')}"></label>
+      <p class="hint">Пока флажок стоит, продавец видит метку на карточке, а продажу
+         приложение не проведёт. Приход и списание брака остаются доступны.</p>
+
       <label class="field">Ссылка на товар в интернет-магазине
         <input type="text" id="pLink" placeholder="store.nsu.ru/…" value="${esc(product?.link || '')}"></label>
       <label class="field">Заметка
@@ -1001,6 +1154,8 @@ function openProductForm(product, category) {
             price: $('#pPrice').value, note: $('#pNote').value,
             name_1c: $('#pNo1c').checked ? '' : $('#pName1c').value,
             link: $('#pLink').value,
+            blocked: $('#pBlocked').checked,
+            block_note: $('#pBlockNote').value,
             material: clothing ? $('#pMaterial').value : '',
             sizes: clothing ? $('#pSizes').value : '',
           };
@@ -1082,7 +1237,7 @@ function bind() {
     const chip = e.target.closest('.chip');
     if (!chip) return;
     const key = chip.dataset.filter;
-    if (key === 'lowOnly' || key === 'no1c') state.filters[key] = !state.filters[key];
+    if (key === 'lowOnly' || key === 'no1c' || key === 'blocked') state.filters[key] = !state.filters[key];
     else state.filters[key] = state.filters[key] === chip.dataset.value ? '' : chip.dataset.value;
     renderStock();
   });
@@ -1092,13 +1247,22 @@ function bind() {
     state.filters[sel.dataset.filter] = sel.value;
     renderStock();
   });
+  $('#viewToggle').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-view]');
+    if (!btn) return;
+    state.view = btn.dataset.view;
+    localStorage.setItem('merch.view', state.view);
+    $$('#viewToggle [data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === state.view));
+    renderStock();
+  });
   $('#sortBy').addEventListener('change', (e) => {
     state.sort = e.target.value;
     localStorage.setItem('merch.sort', state.sort);
     renderStock();
   });
   $('#resetFilters').addEventListener('click', () => {
-    state.filters = { q: '', category: '', kind: '', color: '', print: '', sizes: [], lowOnly: false, no1c: false };
+    state.filters = { q: '', category: '', kind: '', color: '', print: '', sizes: [],
+                      lowOnly: false, no1c: false, blocked: false };
     $('#search').value = '';
     renderStock();
   });
@@ -1120,7 +1284,7 @@ function bind() {
     const batch = e.target.closest('[data-batch]');
     if (batch) return openBatch(Number(batch.dataset.batch), batch.dataset.inventory === '1');
     const alt = e.target.closest('[data-alt]');
-    if (alt) return openOverrides(Number(alt.dataset.alt));
+    if (alt) return openMarks(Number(alt.dataset.alt));
     const editStock = e.target.closest('[data-edit-stock]');
     if (editStock) {
       const p = state.data.products.find((x) => x.id === Number(editStock.dataset.editStock));
@@ -1137,10 +1301,11 @@ function bind() {
     }
     const actBtn = e.target.closest('[data-act]');
     if (!actBtn) return;
-    const tileEl = actBtn.closest('.size');
+    const tileEl = actBtn.closest('.size') || (actBtn.dataset.act === 'both' ? actBtn : null);
     if (!tileEl) return;
     const product = state.data.products.find((p) => p.id === Number(tileEl.dataset.product));
-    openReasonPopover(actBtn, product, tileEl.dataset.size, actBtn.dataset.act === 'plus' ? 1 : -1);
+    const dir = { plus: 1, minus: -1, both: 0 }[actBtn.dataset.act];
+    openReasonPopover(actBtn, product, tileEl.dataset.size, dir);
   });
 
   // Меню причин
@@ -1435,6 +1600,7 @@ async function init() {
   $('#repTo').value = today();
   $('#wDate').value = today();
   $('#sortBy').value = state.sort;
+  $$('#viewToggle [data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === state.view));
 
   if (!state.seller) {
     const first = state.data.sellers.find((s) => s.active);

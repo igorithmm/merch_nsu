@@ -7,9 +7,11 @@ from datetime import date, datetime, timedelta
 from . import db
 
 SIZE_PRESETS = [
-    {"id": "ru42_56", "label": "Российские 42–56", "sizes": ["42", "44", "46", "48", "50", "52", "54", "56"]},
-    {"id": "ru40_60", "label": "Российские 40–60", "sizes": ["40", "42", "44", "46", "48", "50", "52", "54", "56", "58", "60"]},
-    {"id": "letters", "label": "Буквенные XS–XXL", "sizes": ["XS", "S", "M", "L", "XL", "XXL"]},
+    {"id": "ru42_56", "label": "Российские 42–56",
+     "sizes": ["42", "44", "46", "48", "50", "52", "54", "56"]},
+    {"id": "letters", "label": "Буквенные XXS–3XL",
+     "sizes": ["XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL"]},
+    {"id": "one_size", "label": "OS (один размер)", "sizes": ["OS"]},
 ]
 
 KIND_LABELS = {
@@ -106,7 +108,9 @@ def list_products(include_archived=False):
     products = db.query(
         "SELECT * FROM products %s ORDER BY category, kind, color, print_name" % where
     )
-    stock_rows = db.query("SELECT product_id, size, qty, alt_1c, alt_note FROM stock")
+    stock_rows = db.query(
+        "SELECT product_id, size, qty, alt_1c, alt_note, blocked, block_note FROM stock"
+    )
     by_product = {}
     for row in stock_rows:
         by_product.setdefault(row["product_id"], {})[row["size"]] = row
@@ -147,6 +151,8 @@ def list_products(include_archived=False):
                     "qty": cell.get("qty", 0),
                     "alt_1c": cell.get("alt_1c", ""),
                     "alt_note": cell.get("alt_note", ""),
+                    "blocked": bool(cell.get("blocked")),
+                    "block_note": cell.get("block_note", ""),
                 }
             )
         out.append(
@@ -161,6 +167,8 @@ def list_products(include_archived=False):
                 "name_1c": p["name_1c"],
                 "link": p["link"],
                 "note": p["note"],
+                "blocked": bool(p["blocked"]),
+                "block_note": p["block_note"],
                 "archived": bool(p["archived"]),
                 "created_at": p["created_at"],
                 "title": db.product_title(p),
@@ -170,6 +178,10 @@ def list_products(include_archived=False):
                 "needs_1c": not (p["name_1c"] or "").strip(),
                 "unpunched": unpunched.get(p["id"], 0),
                 "overrides": sum(1 for r in rows if r["alt_1c"]),
+                "blocked_sizes": sum(1 for r in rows if r["blocked"]),
+                "sellable": not p["blocked"] and any(
+                    r["qty"] > 0 and not r["blocked"] for r in rows
+                ),
             }
         )
     return out
@@ -212,6 +224,8 @@ def save_product(payload, product_id=None, seller=""):
         (payload.get("name_1c") or "").strip(),
         link,
         (payload.get("note") or "").strip(),
+        1 if payload.get("blocked") else 0,
+        (payload.get("block_note") or "").strip(),
     )
     title = db.product_title(
         {"kind": fields[1], "color": fields[2], "print_name": fields[3]}
@@ -220,7 +234,8 @@ def save_product(payload, product_id=None, seller=""):
     if product_id is None:
         cur = db.execute(
             "INSERT INTO products(category, kind, color, print_name, material, price, sizes, "
-            "name_1c, link, note, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "name_1c, link, note, blocked, block_note, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             fields + (db.now_iso(),),
         )
         product_id = cur.lastrowid
@@ -232,7 +247,8 @@ def save_product(payload, product_id=None, seller=""):
         get_product(product_id)
         db.execute(
             "UPDATE products SET category = ?, kind = ?, color = ?, print_name = ?, "
-            "material = ?, price = ?, sizes = ?, name_1c = ?, link = ?, note = ? WHERE id = ?",
+            "material = ?, price = ?, sizes = ?, name_1c = ?, link = ?, note = ?, "
+            "blocked = ?, block_note = ? WHERE id = ?",
             fields + (product_id,),
         )
         db.log_event(db.KIND_PRODUCT_EDITED, product_id, title, seller)
@@ -272,36 +288,42 @@ def delete_product(product_id, seller=""):
     db.log_event(db.KIND_PRODUCT_DELETED, None, title, seller)
 
 
-def save_overrides(payload):
-    """Пересорт: у каких размеров товара своё наименование в 1С."""
+def save_marks(payload):
+    """Отметки размеров: пересорт в 1С и запрет продажи."""
     product_id = _int(payload.get("product_id"), 0)
     product = get_product(product_id)
     items = payload.get("items") or {}
     if not isinstance(items, dict):
-        raise ApiError("Неверный формат пересорта")
+        raise ApiError("Неверный формат отметок")
 
     known = set(db.parse_sizes(product["sizes"])) | {
         r["size"] for r in db.query("SELECT size FROM stock WHERE product_id = ?", (product_id,))
     }
-    changed = []
+    with_alt, blocked = [], []
     for size, value in items.items():
         size = str(size)
         if size not in known:
             continue
-        if isinstance(value, dict):
-            alt_1c, alt_note = value.get("name_1c") or "", value.get("note") or ""
-        else:
-            alt_1c, alt_note = value or "", ""
-        db.set_size_override(product_id, size, str(alt_1c), str(alt_note))
-        if str(alt_1c).strip():
-            changed.append(size)
+        value = value if isinstance(value, dict) else {"name_1c": value}
+        alt_1c = str(value.get("name_1c") or "")
+        is_blocked = bool(value.get("blocked"))
+        db.set_size_marks(
+            product_id, size, alt_1c, str(value.get("note") or ""),
+            is_blocked, str(value.get("block_note") or ""),
+        )
+        if alt_1c.strip():
+            with_alt.append(size)
+        if is_blocked:
+            blocked.append(size)
 
+    parts = []
+    parts.append("пересорт: " + ", ".join(with_alt) if with_alt else "пересорт снят")
+    parts.append("снято с продажи: " + ", ".join(blocked) if blocked else "стоп-продаж нет")
     db.log_event(
         db.KIND_PRODUCT_EDITED, product_id, db.product_title(product),
-        (payload.get("seller") or "").strip(),
-        "Пересорт: %s" % (", ".join(changed) if changed else "снят со всех размеров"),
+        (payload.get("seller") or "").strip(), "Отметки размеров — " + "; ".join(parts),
     )
-    return {"changed": changed}
+    return {"overrides": with_alt, "blocked": blocked}
 
 
 # --- Продавцы --------------------------------------------------------------
@@ -791,7 +813,7 @@ def build_reports(params):
             bucket.setdefault(s["size"], {"sold": 0, "stock": 0})["stock"] += s["qty"]
 
     sizes_report = []
-    for scale in ("num", "letter", "other"):
+    for scale in ("num", "letter", "one", "other"):
         bucket = scales.get(scale)
         if not bucket:
             continue
@@ -850,8 +872,14 @@ def build_reports(params):
     }
 
 
-LETTER_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-SCALE_LABELS = {"num": "Числовой ряд", "letter": "Буквенный ряд", "other": "Прочие размеры"}
+LETTER_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "XXXL", "4XL"]
+ONE_SIZES = ["OS", "ONE", "ONESIZE"]
+SCALE_LABELS = {
+    "num": "Числовой ряд",
+    "letter": "Буквенный ряд",
+    "one": "Один размер",
+    "other": "Прочие размеры",
+}
 
 
 def _scale_of(size):
@@ -860,6 +888,8 @@ def _scale_of(size):
         return "num"
     if s in LETTER_SIZES:
         return "letter"
+    if s in ONE_SIZES:
+        return "one"
     return "other"
 
 
@@ -880,7 +910,8 @@ def export_stock_csv():
     writer = csv.writer(buf, delimiter=";")
     writer.writerow([
         "Категория", "Тип", "Цвет", "Принт", "Материал", "Размер", "Остаток",
-        "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как", "Ссылка",
+        "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
+        "Снят с продажи", "Ссылка",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
@@ -889,7 +920,9 @@ def export_stock_csv():
                 product["kind"], product["color"], product["print_name"], product["material"],
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
                 s["qty"], product["price"], s["qty"] * product["price"],
-                product["name_1c"], s["alt_1c"], product["link"],
+                product["name_1c"], s["alt_1c"],
+                "да" if (product["blocked"] or s["blocked"]) else "",
+                product["link"],
             ])
     return buf.getvalue()
 
@@ -979,6 +1012,11 @@ def bootstrap():
             )["n"],
             "overrides": db.query_one(
                 "SELECT COUNT(*) AS n FROM stock WHERE alt_1c <> ''"
+            )["n"],
+            "blocked": db.query_one(
+                "SELECT (SELECT COUNT(*) FROM products WHERE blocked = 1 AND archived = 0) + "
+                "(SELECT COUNT(*) FROM stock s JOIN products p ON p.id = s.product_id "
+                "WHERE s.blocked = 1 AND p.blocked = 0 AND p.archived = 0) AS n"
             )["n"],
         },
     }

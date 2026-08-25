@@ -16,7 +16,13 @@ PRODUCTS = [
     (db.CAT_CLOTHING, "Футболка", "синяя", "надпись NSU", "Хлопок 100%", 1500,
      "42,44,46,48,50,52,54,56", "Футболка НГУ синяя NSU", ""),
     (db.CAT_CLOTHING, "Худи", "серая", "малый герб", "Футер двухнитка", 4500,
-     "XS,S,M,L,XL,XXL", "", ""),
+     "XXS,XS,S,M,L,XL,XXL,3XL", "", ""),
+    (db.CAT_CLOTHING, "Футболка", "фуксия", "надпись NSU", "Хлопок 100%", 1600,
+     "42,44,46,48,50,52", "Футболка НГУ фуксия NSU", ""),
+    (db.CAT_CLOTHING, "Шопер", "молочный", "большая печать", "Хлопок 100%", 900,
+     "OS", "Шопер НГУ молочный", "https://store.nsu.ru/shopper"),
+    (db.CAT_SOUVENIR, "Термокружка", "морская волна", "герб НГУ", "", 1900, "",
+     "Термокружка НГУ", ""),
     (db.CAT_SOUVENIR, "Кружка", "белая", "герб НГУ", "", 650, "",
      "Кружка НГУ белая герб", "https://store.nsu.ru/mug-white"),
     (db.CAT_SOUVENIR, "Ручка", "синяя", "логотип", "", 180, "", "Ручка НГУ синяя", ""),
@@ -102,6 +108,17 @@ def seed():
                     0 if name_1c else 1,
                 ),
             )
+
+    # Пример стоп-продажи: один товар целиком и один размер у другого.
+    db.execute(
+        "UPDATE products SET blocked = 1, block_note = ? WHERE kind = ? AND color = ?",
+        ("ждём переоценку после подорожания", "Значок", ""),
+    )
+    hoodie = db.query_one(
+        "SELECT id FROM products WHERE kind = ? AND color = ?", ("Худи", "серая")
+    )
+    if hoodie:
+        db.set_size_marks(hoodie["id"], "3XL", "", "", True, "бракованная партия, ждём замену")
 
     for product, contact, seller, note, status, days_ago in WISHES:
         wish_id = api.save_wish(

@@ -79,17 +79,22 @@ CREATE TABLE IF NOT EXISTS products (
     name_1c    TEXT NOT NULL DEFAULT '',
     link       TEXT NOT NULL DEFAULT '',
     note       TEXT NOT NULL DEFAULT '',
+    blocked    INTEGER NOT NULL DEFAULT 0,
+    block_note TEXT NOT NULL DEFAULT '',
     archived   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
--- alt_1c — пересорт: этот размер продаётся в кассе под другим наименованием 1С.
+-- alt_1c   — пересорт: этот размер продаётся в кассе под другим наименованием 1С.
+-- blocked  — размер временно снят с продажи.
 CREATE TABLE IF NOT EXISTS stock (
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     size       TEXT NOT NULL,
     qty        INTEGER NOT NULL DEFAULT 0,
     alt_1c     TEXT NOT NULL DEFAULT '',
     alt_note   TEXT NOT NULL DEFAULT '',
+    blocked    INTEGER NOT NULL DEFAULT 0,
+    block_note TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (product_id, size)
 );
 
@@ -161,10 +166,14 @@ NEW_COLUMNS = {
         ("material", "TEXT NOT NULL DEFAULT ''"),
         ("name_1c", "TEXT NOT NULL DEFAULT ''"),
         ("link", "TEXT NOT NULL DEFAULT ''"),
+        ("blocked", "INTEGER NOT NULL DEFAULT 0"),
+        ("block_note", "TEXT NOT NULL DEFAULT ''"),
     ],
     "stock": [
         ("alt_1c", "TEXT NOT NULL DEFAULT ''"),
         ("alt_note", "TEXT NOT NULL DEFAULT ''"),
+        ("blocked", "INTEGER NOT NULL DEFAULT 0"),
+        ("block_note", "TEXT NOT NULL DEFAULT ''"),
     ],
     "movements": [
         ("sold_as", "TEXT NOT NULL DEFAULT ''"),
@@ -308,13 +317,16 @@ def sync_stock_rows(product_id, sizes):
         conn.commit()
 
 
-def set_size_override(product_id, size, alt_1c, alt_note=""):
-    """Пересорт: этот размер продаётся в кассе под другим наименованием 1С."""
+def set_size_marks(product_id, size, alt_1c, alt_note="", blocked=False, block_note=""):
+    """Отметки размера: пересорт в 1С и запрет продажи."""
     execute(
-        "INSERT INTO stock(product_id, size, qty, alt_1c, alt_note) VALUES(?, ?, 0, ?, ?) "
+        "INSERT INTO stock(product_id, size, qty, alt_1c, alt_note, blocked, block_note) "
+        "VALUES(?, ?, 0, ?, ?, ?, ?) "
         "ON CONFLICT(product_id, size) DO UPDATE SET alt_1c = excluded.alt_1c, "
-        "alt_note = excluded.alt_note",
-        (product_id, size, alt_1c.strip(), alt_note.strip()),
+        "alt_note = excluded.alt_note, blocked = excluded.blocked, "
+        "block_note = excluded.block_note",
+        (product_id, size, alt_1c.strip(), alt_note.strip(),
+         1 if blocked else 0, block_note.strip()),
     )
 
 
@@ -350,9 +362,24 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
             raise StockError("Товар не найден")
 
         row = conn.execute(
-            "SELECT qty, alt_1c FROM stock WHERE product_id = ? AND size = ?", (product_id, size)
+            "SELECT qty, alt_1c, blocked, block_note FROM stock "
+            "WHERE product_id = ? AND size = ?", (product_id, size)
         ).fetchone()
         current = row["qty"] if row else 0
+
+        # Стоп-продажа: товар или отдельный размер временно нельзя продавать.
+        # Приход, брак и коррекции при этом остаются доступны.
+        if kind == KIND_SALE:
+            if product["blocked"]:
+                raise StockError(
+                    "Товар снят с продажи%s"
+                    % (": " + product["block_note"] if product["block_note"] else "")
+                )
+            if row and row["blocked"]:
+                raise StockError(
+                    "Размер %s снят с продажи%s"
+                    % (size, ": " + row["block_note"] if row["block_note"] else "")
+                )
         new_qty = current + delta
         if new_qty < 0 and not allow_negative:
             raise StockError("На складе %d шт — списать %d нельзя" % (current, -delta))
