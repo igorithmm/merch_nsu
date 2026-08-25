@@ -266,7 +266,9 @@ function renderStock() {
   if (!state.data.products.length) {
     grid.innerHTML = `<div class="empty">
       <div class="empty__title">Товаров пока нет</div>
-      Заведите первую модель на вкладке «Товары» — например, толстовку фиолетовую с большой печатью.
+      <p>Заведите первую модель на вкладке «Товары» — например, толстовку фиолетовую
+         с большой печатью. Или посмотрите, как всё выглядит на готовом примере.</p>
+      <button class="btn btn--primary" id="seedDemo">Заполнить примером</button>
     </div>`;
     return;
   }
@@ -786,7 +788,18 @@ function bind() {
     renderStock();
   });
 
-  $('#productGrid').addEventListener('click', (e) => {
+  $('#productGrid').addEventListener('click', async (e) => {
+    const seed = e.target.closest('#seedDemo');
+    if (seed) {
+      if (!confirm('Заполнить базу примером товаров и продаж? Это делается один раз, в пустую базу.')) return;
+      seed.disabled = true;
+      try {
+        const res = await apiPost('/api/demo');
+        await reload();
+        toast(`Пример добавлен: ${res.added} ${plural(res.added, 'модель', 'модели', 'моделей')}`);
+      } catch (err) { seed.disabled = false; toast(err.message, { kind: 'err' }); }
+      return;
+    }
     const batch = e.target.closest('[data-batch]');
     if (batch) return openBatch(Number(batch.dataset.batch), batch.dataset.inventory === '1');
     const history = e.target.closest('[data-history]');
@@ -925,6 +938,11 @@ function bind() {
       renderSettings();
     } catch (err) { toast(err.message, { kind: 'err' }); }
   });
+  $('#shutdownBtn').addEventListener('click', async () => {
+    if (!confirm('Завершить работу приложения? Все данные уже сохранены.')) return;
+    try { await apiPost('/api/shutdown'); } catch (_) { /* сервер закрылся, не дослав ответ */ }
+    showFarewell();
+  });
   $('#saveSettings').addEventListener('click', async () => {
     try {
       await apiPost('/api/settings', {
@@ -949,6 +967,15 @@ function bind() {
       if (primary && document.activeElement.tagName !== 'TEXTAREA') primary.click();
     }
   });
+}
+
+function showFarewell() {
+  document.body.innerHTML = `<div class="farewell">
+    <div class="farewell__mark">НГУ</div>
+    <h1>Приложение закрыто</h1>
+    <p>Все продажи и приёмки сохранены в базе. Эту вкладку можно закрыть.</p>
+    <p class="muted">Чтобы начать работу снова, дважды щёлкните по ярлыку «Запустить».</p>
+  </div>`;
 }
 
 /* ---------- Старт ---------- */

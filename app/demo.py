@@ -18,9 +18,9 @@ SELLERS = ["Игорь", "Анна", "Максим"]
 
 
 def seed():
+    """Заполняет пустую базу примером. Возвращает число заведённых моделей."""
     if db.query_one("SELECT COUNT(*) AS n FROM products")["n"]:
-        print("  База уже не пустая — пример данных не добавлен.")
-        return
+        return 0
 
     for name in SELLERS:
         api.add_seller(name)
@@ -85,4 +85,4 @@ def seed():
                 ),
             )
 
-    print("  Пример данных добавлен: %d моделей." % len(PRODUCTS))
+    return len(PRODUCTS)

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Запуск приложения «Мерч НГУ».
 
+Обычно запускается двойным кликом по ярлыку «Запустить» рядом с этим файлом.
+Из терминала тоже работает:
+
     python run.py            — поднять сервер и открыть браузер
     python run.py --port 9000
     python run.py --no-browser
@@ -8,12 +11,53 @@
 """
 
 import argparse
+import http.client
+import json
+import os
 import socket
 import sys
 import threading
 import webbrowser
 
-from app import db, server
+# Метка, по которой ярлык узнаёт уже работающее приложение (дублирует app.server,
+# чтобы проверка не требовала импорта пакета — тот может и не загрузиться).
+APP_TOKEN = "merch-nsu"
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.dirname(os.environ.get("MERCH_DB", "")) or os.path.join(HERE, "data")
+
+
+def redirect_output_to_log():
+    """Ярлык запускает программу без окна консоли — тогда sys.stdout is None,
+    и любая печать или трассировка уронила бы приложение. Пишем в файл."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    os.makedirs(DATA_DIR, exist_ok=True)
+    sys.stdout = sys.stderr = open(os.path.join(DATA_DIR, "app.log"), "a", encoding="utf-8")
+
+
+def show_error(message):
+    """Сообщение об ошибке видно, даже когда окна консоли нет."""
+    print(message)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, message, "Мерч НГУ", 0x10)
+        except Exception:
+            pass
+
+
+def already_running(host, port):
+    """Приложение уже открыто на этом порту? Тогда второй раз запускать не нужно."""
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=1.5)
+        conn.request("GET", "/api/ping")
+        data = json.loads(conn.getresponse().read().decode("utf-8"))
+        conn.close()
+        return data.get("app") == APP_TOKEN
+    except Exception:
+        return False
 
 
 def find_free_port(host, preferred):
@@ -36,11 +80,27 @@ def main():
     parser.add_argument("--demo", action="store_true", help="заполнить пример данных")
     args = parser.parse_args()
 
+    redirect_output_to_log()
+
+    # Импорт внутри main: если пакет не загрузится, ошибку покажет окно,
+    # а не молчаливое исчезновение процесса при запуске без консоли.
+    from app import db, server
+
+    # Повторный клик по ярлыку не поднимает второе приложение — просто открывает вкладку.
+    if already_running(args.host, args.port):
+        url = "http://%s:%d/" % (args.host, args.port)
+        print("Приложение уже работает, открываю %s" % url)
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
+
     db.connect()
     if args.demo:
         from app import demo
 
-        demo.seed()
+        added = demo.seed()
+        print("  Пример данных добавлен: %d моделей." % added if added
+              else "  База уже не пустая — пример данных не добавлен.")
 
     port = find_free_port(args.host, args.port)
     url = "http://%s:%d/" % (args.host, port)
@@ -51,7 +111,7 @@ def main():
     print("  ----------------------")
     print("  Открыто:  %s" % url)
     print("  База:     %s" % db.DB_PATH)
-    print("  Остановить: Ctrl+C")
+    print("  Закрыть:  кнопка «Завершить работу» в настройках приложения")
     print()
 
     if not args.no_browser:
@@ -60,10 +120,16 @@ def main():
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n  Остановлено. Данные сохранены.")
-        httpd.shutdown()
+        pass
+    print("Остановлено. Данные сохранены.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 — иначе окно просто исчезнет без объяснений
+        show_error("Не удалось запустить приложение:\n\n%s" % exc)
+        sys.exit(1)

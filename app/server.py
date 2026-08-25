@@ -5,12 +5,25 @@ import mimetypes
 import os
 import posixpath
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import api, db
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+# По этой метке ярлык запуска понимает, что приложение уже работает.
+APP_TOKEN = "merch-nsu"
+
+_httpd = None
+
+
+def stop_server():
+    """Завершает работу по кнопке из интерфейса — из отдельного потока,
+    иначе сервер заблокирует сам себя, ожидая окончания текущего запроса."""
+    if _httpd is not None:
+        threading.Thread(target=_httpd.shutdown, daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -86,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
         route = path[len("/api/"):].rstrip("/")
 
         if method == "GET":
+            if route == "ping":
+                return self._json({"app": APP_TOKEN})
             if route == "bootstrap":
                 return self._json(api.bootstrap())
             if route == "products":
@@ -133,6 +148,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.do_set_qty(body))
             if route == "undo":
                 return self._json(api.do_undo(body))
+            if route == "demo":
+                from . import demo
+
+                added = demo.seed()
+                if not added:
+                    return self._error("В базе уже есть товары — пример не добавлен")
+                return self._json({"added": added, "products": api.list_products()})
+            if route == "shutdown":
+                self._json({"ok": True})
+                stop_server()
+                return None
             if route == "sellers":
                 return self._json({"id": api.add_seller(body.get("name")), "sellers": api.list_sellers(True)})
             match = re.fullmatch(r"sellers/(\d+)/active", route)
@@ -180,7 +206,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(host="127.0.0.1", port=8765):
+    global _httpd
     db.connect()
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    httpd.daemon_threads = True
-    return httpd
+    _httpd = ThreadingHTTPServer((host, port), Handler)
+    _httpd.daemon_threads = True
+    return _httpd
