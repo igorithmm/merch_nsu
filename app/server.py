@@ -206,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
                 api.set_seller_active(int(match.group(1)), bool(body.get("active", True)))
                 return self._json({"sellers": api.list_sellers(True)})
             if route == "settings":
-                for key in ("low_stock", "dead_days"):
+                for key in ("low_souvenir", "high_clothing", "high_souvenir", "dead_days"):
                     if key in body:
                         db.set_setting(key, int(body[key]))
                 return self._json({"ok": True})

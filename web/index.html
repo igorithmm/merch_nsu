@@ -19,23 +19,26 @@
       <span class="seller__label">Смена</span>
       <select id="sellerSelect" aria-label="Продавец"></select>
     </label>
+    <button class="btn btn--sm btn--quit" id="shutdownBtn" title="Закрыть приложение — данные уже сохранены">Завершить работу</button>
+    <button class="icon-btn" id="helpBtn" title="Справка по работе с приложением">?</button>
     <button class="icon-btn" id="themeBtn" title="Светлая / тёмная тема">◐</button>
   </div>
 </header>
 
 <nav class="tabs" id="tabs">
   <button class="tab" data-tab="stock">Остатки</button>
-  <button class="tab" data-tab="punch">Не пробито<span class="badge" data-badge="unpunched"></span></button>
-  <button class="tab" data-tab="journal">Журнал</button>
-  <button class="tab" data-tab="wishes">Желания<span class="badge badge--calm" data-badge="wishes"></span></button>
-  <button class="tab" data-tab="reports">Отчёты</button>
   <button class="tab" data-tab="catalog">Товары</button>
+  <button class="tab" data-tab="punch">Не пробито<span class="badge" data-badge="unpunched"></span></button>
+  <button class="tab" data-tab="wishes">Желания<span class="badge badge--calm" data-badge="wishes"></span></button>
+  <button class="tab" data-tab="journal">Журнал</button>
+  <button class="tab" data-tab="reports">Отчёты</button>
   <button class="tab" data-tab="settings">Настройки</button>
 </nav>
 
 <main>
   <!-- ОСТАТКИ -->
   <section class="view" id="view-stock">
+    <div class="cats" id="cats" role="group" aria-label="Категория товара"></div>
     <div class="toolbar">
       <div class="search">
         <span class="search__ico">⌕</span>
@@ -191,10 +194,18 @@
         </form>
       </div>
       <div class="panel">
-        <h2 class="panel__title">Пороги</h2>
-        <p class="panel__hint">По ним подсвечиваются остатки и считаются отчёты.</p>
-        <label class="field">Мало на складе, шт (жёлтая подсветка)
-          <input type="number" id="lowStock" min="0" max="99">
+        <h2 class="panel__title">Пороги подсветки</h2>
+        <p class="panel__hint">Ноль всегда красный. Жёлтая подсветка «мало» есть только у
+          сувенирки — у одежды одна-две штуки размера это норма. Зелёная показывает, что
+          товара с запасом.</p>
+        <label class="field">Одежда: много, шт по размеру (зелёная)
+          <input type="number" id="highClothing" min="1" max="999">
+        </label>
+        <label class="field">Сувенирка: мало, шт (жёлтая)
+          <input type="number" id="lowSouvenir" min="0" max="999">
+        </label>
+        <label class="field">Сувенирка: много, шт (зелёная)
+          <input type="number" id="highSouvenir" min="1" max="9999">
         </label>
         <label class="field">Считать залежавшимся после, дней
           <input type="number" id="deadDays" min="1" max="999">
@@ -209,11 +220,6 @@
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>
           <a class="btn btn--ghost" href="/api/export/wishes.csv">Желания в CSV</a>
         </div>
-      </div>
-      <div class="panel">
-        <h2 class="panel__title">Завершение работы</h2>
-        <p class="panel__hint">Данные сохраняются сразу после каждой операции — закрывать можно в любой момент. Чтобы открыть приложение снова, дважды щёлкните по ярлыку «Запустить».</p>
-        <button class="btn btn--danger" id="shutdownBtn">Завершить работу</button>
       </div>
     </div>
   </section>

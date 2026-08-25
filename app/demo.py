@@ -118,7 +118,7 @@ def seed():
         "SELECT id FROM products WHERE kind = ? AND color = ?", ("Худи", "серая")
     )
     if hoodie:
-        db.set_size_marks(hoodie["id"], "3XL", "", "", True, "бракованная партия, ждём замену")
+        db.set_size_marks(hoodie["id"], "3XL", "", "", 1, "одна испачкана, ждём химчистку")
 
     for product, contact, seller, note, status, days_ago in WISHES:
         wish_id = api.save_wish(

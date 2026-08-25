@@ -59,7 +59,11 @@ WISH_STATUSES = [
 ]
 WISH_STATUS_LABELS = {s["id"]: s["label"] for s in WISH_STATUSES}
 
-LOW_STOCK_DEFAULT = 2
+# Пороги подсветки. Жёлтая («мало») осталась только у сувенирки: у одежды
+# один-два экземпляра размера — норма, а не повод для тревоги.
+LOW_SOUVENIR_DEFAULT = 3        # жёлтая подсветка сувенирки
+HIGH_CLOTHING_DEFAULT = 5       # зелёная подсветка одежды
+HIGH_SOUVENIR_DEFAULT = 15      # зелёная подсветка сувенирки
 DEAD_DAYS_DEFAULT = 30
 
 
@@ -92,8 +96,16 @@ def _ts_range(date_from, date_to):
     return date_from + " 00:00:00", date_to + " 23:59:59"
 
 
-def low_stock_threshold():
-    return _int(db.get_setting("low_stock", LOW_STOCK_DEFAULT), LOW_STOCK_DEFAULT)
+def thresholds():
+    """Пороги подсветки остатка; жёлтый — только для сувенирной продукции."""
+    return {
+        "low_souvenir": _int(
+            db.get_setting("low_souvenir", LOW_SOUVENIR_DEFAULT), LOW_SOUVENIR_DEFAULT),
+        "high_clothing": _int(
+            db.get_setting("high_clothing", HIGH_CLOTHING_DEFAULT), HIGH_CLOTHING_DEFAULT),
+        "high_souvenir": _int(
+            db.get_setting("high_souvenir", HIGH_SOUVENIR_DEFAULT), HIGH_SOUVENIR_DEFAULT),
+    }
 
 
 def _category(value):
@@ -109,7 +121,7 @@ def list_products(include_archived=False):
         "SELECT * FROM products %s ORDER BY category, kind, color, print_name" % where
     )
     stock_rows = db.query(
-        "SELECT product_id, size, qty, alt_1c, alt_note, blocked, block_note FROM stock"
+        "SELECT product_id, size, qty, alt_1c, alt_note, blocked_qty, block_note FROM stock"
     )
     by_product = {}
     for row in stock_rows:
@@ -151,7 +163,7 @@ def list_products(include_archived=False):
                     "qty": cell.get("qty", 0),
                     "alt_1c": cell.get("alt_1c", ""),
                     "alt_note": cell.get("alt_note", ""),
-                    "blocked": bool(cell.get("blocked")),
+                    "blocked_qty": min(cell.get("blocked_qty", 0), cell.get("qty", 0)),
                     "block_note": cell.get("block_note", ""),
                 }
             )
@@ -178,9 +190,9 @@ def list_products(include_archived=False):
                 "needs_1c": not (p["name_1c"] or "").strip(),
                 "unpunched": unpunched.get(p["id"], 0),
                 "overrides": sum(1 for r in rows if r["alt_1c"]),
-                "blocked_sizes": sum(1 for r in rows if r["blocked"]),
-                "sellable": not p["blocked"] and any(
-                    r["qty"] > 0 and not r["blocked"] for r in rows
+                "blocked_qty": sum(r["blocked_qty"] for r in rows),
+                "available": 0 if p["blocked"] else sum(
+                    max(0, r["qty"] - r["blocked_qty"]) for r in rows
                 ),
             }
         )
@@ -299,6 +311,10 @@ def save_marks(payload):
     known = set(db.parse_sizes(product["sizes"])) | {
         r["size"] for r in db.query("SELECT size FROM stock WHERE product_id = ?", (product_id,))
     }
+    stock = {
+        r["size"]: r["qty"]
+        for r in db.query("SELECT size, qty FROM stock WHERE product_id = ?", (product_id,))
+    }
     with_alt, blocked = [], []
     for size, value in items.items():
         size = str(size)
@@ -306,15 +322,20 @@ def save_marks(payload):
             continue
         value = value if isinstance(value, dict) else {"name_1c": value}
         alt_1c = str(value.get("name_1c") or "")
-        is_blocked = bool(value.get("blocked"))
+        blocked_qty = max(0, _int(value.get("blocked_qty"), 0))
+        if blocked_qty > stock.get(size, 0):
+            raise ApiError(
+                "Размер %s: снять с продажи %d шт нельзя, на складе всего %d"
+                % (size, blocked_qty, stock.get(size, 0))
+            )
         db.set_size_marks(
             product_id, size, alt_1c, str(value.get("note") or ""),
-            is_blocked, str(value.get("block_note") or ""),
+            blocked_qty, str(value.get("block_note") or ""),
         )
         if alt_1c.strip():
             with_alt.append(size)
-        if is_blocked:
-            blocked.append(size)
+        if blocked_qty:
+            blocked.append("%s — %d шт" % (size, blocked_qty))
 
     parts = []
     parts.append("пересорт: " + ", ".join(with_alt) if with_alt else "пересорт снят")
@@ -699,7 +720,7 @@ def build_reports(params):
     ts_from, ts_to = _ts_range(date_from, date_to)
     days = max(1, (date.fromisoformat(date_to) - date.fromisoformat(date_from)).days + 1)
     dead_days = max(1, _int(params.get("dead_days"), DEAD_DAYS_DEFAULT))
-    low = low_stock_threshold()
+    low = thresholds()["low_souvenir"]
     kind_filter = (params.get("kind") or "").strip()
     category_filter = (params.get("category") or "").strip()
 
@@ -911,7 +932,7 @@ def export_stock_csv():
     writer.writerow([
         "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
         "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
-        "Снят с продажи",
+        "Снято с продажи, шт",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
@@ -921,7 +942,7 @@ def export_stock_csv():
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
                 s["qty"], product["price"], s["qty"] * product["price"],
                 product["name_1c"], s["alt_1c"],
-                "да" if (product["blocked"] or s["blocked"]) else "",
+                s["qty"] if product["blocked"] else (s["blocked_qty"] or ""),
             ])
     return buf.getvalue()
 
@@ -990,11 +1011,11 @@ def bootstrap():
         "plus_reasons": PLUS_REASONS,
         "minus_reasons": MINUS_REASONS,
         "wish_statuses": WISH_STATUSES,
-        "settings": {
-            "low_stock": low_stock_threshold(),
-            "dead_days": _int(db.get_setting("dead_days", DEAD_DAYS_DEFAULT), DEAD_DAYS_DEFAULT),
-            "trash_days": db.TRASH_DAYS,
-        },
+        "settings": dict(
+            thresholds(),
+            dead_days=_int(db.get_setting("dead_days", DEAD_DAYS_DEFAULT), DEAD_DAYS_DEFAULT),
+            trash_days=db.TRASH_DAYS,
+        ),
         "counters": {
             "unpunched": db.query_one(
                 "SELECT COUNT(*) AS n FROM movements WHERE kind = ? AND needs_punch = 1 "
@@ -1015,7 +1036,7 @@ def bootstrap():
             "blocked": db.query_one(
                 "SELECT (SELECT COUNT(*) FROM products WHERE blocked = 1 AND archived = 0) + "
                 "(SELECT COUNT(*) FROM stock s JOIN products p ON p.id = s.product_id "
-                "WHERE s.blocked = 1 AND p.blocked = 0 AND p.archived = 0) AS n"
+                "WHERE s.blocked_qty > 0 AND p.blocked = 0 AND p.archived = 0) AS n"
             )["n"],
         },
     }

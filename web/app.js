@@ -17,54 +17,113 @@ const state = {
 
 // Цвет полоски на карточке. Ключ — основа слова без окончания, поэтому
 // «фиолетовый», «фиолетовая» и «фиолетовые» дают один и тот же оттенок.
+// Третий элемент — как цвет называется в справке; без него запись считается
+// синонимом и в гайде не показывается.
 const SWATCHES = [
   // белые и молочные
-  ['белоснежн', '#ffffff'], ['бел', '#f4f6fa'], ['молочн', '#f7efe0'],
-  ['кремов', '#f2e6cf'], ['слонов', '#f4efe2'], ['экрю', '#e8e0d0'],
-  ['ванильн', '#f6ecc9'], ['айвори', '#f4efe2'],
+  ['белоснежн', '#ffffff', 'белоснежный', 'Белые и молочные'],
+  ['бел', '#f4f6fa', 'белый', 'Белые и молочные'],
+  ['молочн', '#f7efe0', 'молочный', 'Белые и молочные'],
+  ['кремов', '#f2e6cf', 'кремовый', 'Белые и молочные'],
+  ['слонов', '#f4efe2', 'слоновая кость', 'Белые и молочные'],
+  ['айвори', '#f4efe2'],
+  ['ванильн', '#f6ecc9', 'ванильный', 'Белые и молочные'],
+  ['экрю', '#e8e0d0', 'экрю', 'Белые и молочные'],
   // бежевые и коричневые
-  ['бежев', '#d9c7a7'], ['песочн', '#ddc9a3'], ['капучино', '#a8825f'],
-  ['верблюжь', '#b98b5a'], ['карамельн', '#c68a4e'], ['кофейн', '#6b4c33'],
-  ['шоколадн', '#5a3a26'], ['коричнев', '#7a5230'], ['горчичн', '#cf9e2b'],
+  ['бежев', '#d9c7a7', 'бежевый', 'Бежевые и коричневые'],
+  ['песочн', '#ddc9a3', 'песочный', 'Бежевые и коричневые'],
+  ['капучино', '#a8825f', 'капучино', 'Бежевые и коричневые'],
+  ['верблюжь', '#b98b5a', 'верблюжий', 'Бежевые и коричневые'],
+  ['карамельн', '#c68a4e', 'карамельный', 'Бежевые и коричневые'],
+  ['горчичн', '#cf9e2b', 'горчичный', 'Бежевые и коричневые'],
+  ['кофейн', '#6b4c33', 'кофейный', 'Бежевые и коричневые'],
+  ['шоколадн', '#5a3a26', 'шоколадный', 'Бежевые и коричневые'],
+  ['коричнев', '#7a5230', 'коричневый', 'Бежевые и коричневые'],
   // серые и чёрные
-  ['светло-сер', '#c3c9d2'], ['тёмно-сер', '#6a7280'], ['темно-сер', '#6a7280'],
-  ['сер', '#9aa3b0'], ['меланж', '#b9bfc9'], ['графит', '#3a3f47'],
-  ['антрацит', '#2b2f36'], ['угольн', '#2a2d33'], ['мокрый асфальт', '#4a5058'],
-  ['чёрн', '#20242c'], ['черн', '#20242c'], ['серебр', '#c0c6cf'],
+  ['светло-сер', '#c3c9d2', 'светло-серый', 'Серые и чёрные'],
+  ['меланж', '#b9bfc9', 'меланж', 'Серые и чёрные'],
+  ['серебр', '#c0c6cf', 'серебряный', 'Серые и чёрные'],
+  ['сер', '#9aa3b0', 'серый', 'Серые и чёрные'],
+  ['тёмно-сер', '#6a7280', 'тёмно-серый', 'Серые и чёрные'],
+  ['темно-сер', '#6a7280'],
+  ['мокрый асфальт', '#4a5058', 'мокрый асфальт', 'Серые и чёрные'],
+  ['графит', '#3a3f47', 'графитовый', 'Серые и чёрные'],
+  ['антрацит', '#2b2f36', 'антрацит', 'Серые и чёрные'],
+  ['угольн', '#2a2d33', 'угольный', 'Серые и чёрные'],
+  ['чёрн', '#20242c', 'чёрный', 'Серые и чёрные'],
+  ['черн', '#20242c'],
   // синие и голубые
-  ['тёмно-син', '#16326b'], ['темно-син', '#16326b'], ['джинсов', '#3f5d8a'],
-  ['васильков', '#4c74d9'], ['индиго', '#2a2f7a'], ['небесн', '#7cc0ef'],
-  ['голуб', '#5aa9e6'], ['син', '#2456b8'], ['лазурн', '#2f97d4'],
-  // бирюза, морская волна, мята
-  ['морская волна', '#2e9d9a'], ['морской волны', '#2e9d9a'], ['морск', '#2e9d9a'],
-  ['бирюзов', '#1fb6b0'], ['аквамарин', '#6fd3c4'], ['мятн', '#7fd0b8'],
-  ['изумрудн', '#1f8a5b'], ['тиффани', '#4fc3c0'],
-  // зелёные
-  ['тёмно-зелён', '#1d5c38'], ['темно-зелен', '#1d5c38'], ['салатов', '#86c740'],
-  ['оливков', '#7a8a3a'], ['болотн', '#5c6b3c'], ['хаки', '#6b7042'],
-  ['фисташков', '#a8c46a'], ['зелён', '#2c8a52'], ['зелен', '#2c8a52'],
+  ['небесн', '#7cc0ef', 'небесный', 'Синие и голубые'],
+  ['голуб', '#5aa9e6', 'голубой', 'Синие и голубые'],
+  ['лазурн', '#2f97d4', 'лазурный', 'Синие и голубые'],
+  ['васильков', '#4c74d9', 'васильковый', 'Синие и голубые'],
+  ['син', '#2456b8', 'синий', 'Синие и голубые'],
+  ['джинсов', '#3f5d8a', 'джинсовый', 'Синие и голубые'],
+  ['индиго', '#2a2f7a', 'индиго', 'Синие и голубые'],
+  ['тёмно-син', '#16326b', 'тёмно-синий', 'Синие и голубые'],
+  ['темно-син', '#16326b'],
+  // бирюза и зелень
+  ['аквамарин', '#6fd3c4', 'аквамарин', 'Бирюза и зелень'],
+  ['мятн', '#7fd0b8', 'мятный', 'Бирюза и зелень'],
+  ['тиффани', '#4fc3c0', 'тиффани', 'Бирюза и зелень'],
+  ['бирюзов', '#1fb6b0', 'бирюзовый', 'Бирюза и зелень'],
+  ['морская волна', '#2e9d9a', 'морская волна', 'Бирюза и зелень'],
+  ['морской волны', '#2e9d9a'],
+  ['морск', '#2e9d9a'],
+  ['фисташков', '#a8c46a', 'фисташковый', 'Бирюза и зелень'],
+  ['салатов', '#86c740', 'салатовый', 'Бирюза и зелень'],
+  ['оливков', '#7a8a3a', 'оливковый', 'Бирюза и зелень'],
+  ['хаки', '#6b7042', 'хаки', 'Бирюза и зелень'],
+  ['болотн', '#5c6b3c', 'болотный', 'Бирюза и зелень'],
+  ['зелён', '#2c8a52', 'зелёный', 'Бирюза и зелень'],
+  ['зелен', '#2c8a52'],
+  ['изумрудн', '#1f8a5b', 'изумрудный', 'Бирюза и зелень'],
+  ['тёмно-зелён', '#1d5c38', 'тёмно-зелёный', 'Бирюза и зелень'],
+  ['темно-зелен', '#1d5c38'],
   // жёлтые и оранжевые
-  ['лимонн', '#e8d84a'], ['золот', '#c9a227'], ['жёлт', '#e5b52c'], ['желт', '#e5b52c'],
-  ['персиков', '#f0b48a'], ['абрикосов', '#f0a862'], ['оранжев', '#e07a2b'],
-  ['терракот', '#b5573a'], ['коралл', '#f0765e'],
+  ['лимонн', '#e8d84a', 'лимонный', 'Жёлтые и оранжевые'],
+  ['жёлт', '#e5b52c', 'жёлтый', 'Жёлтые и оранжевые'],
+  ['желт', '#e5b52c'],
+  ['золот', '#c9a227', 'золотой', 'Жёлтые и оранжевые'],
+  ['персиков', '#f0b48a', 'персиковый', 'Жёлтые и оранжевые'],
+  ['абрикосов', '#f0a862', 'абрикосовый', 'Жёлтые и оранжевые'],
+  ['оранжев', '#e07a2b', 'оранжевый', 'Жёлтые и оранжевые'],
+  ['терракот', '#b5573a', 'терракотовый', 'Жёлтые и оранжевые'],
   // красные и бордовые
-  ['алы', '#d92b2b'], ['красн', '#cf3030'], ['вишнёв', '#8f1d33'], ['вишнев', '#8f1d33'],
-  ['бордов', '#7d1f2e'], ['марсала', '#7b3644'], ['малинов', '#b3195a'],
+  ['коралл', '#f0765e', 'коралловый', 'Красные и бордовые'],
+  ['алы', '#d92b2b', 'алый', 'Красные и бордовые'],
+  ['красн', '#cf3030', 'красный', 'Красные и бордовые'],
+  ['малинов', '#b3195a', 'малиновый', 'Красные и бордовые'],
+  ['вишнёв', '#8f1d33', 'вишнёвый', 'Красные и бордовые'],
+  ['вишнев', '#8f1d33'],
+  ['бордов', '#7d1f2e', 'бордовый', 'Красные и бордовые'],
+  ['марсала', '#7b3644', 'марсала', 'Красные и бордовые'],
   // розовые и фиолетовые
-  ['фуксия', '#e0218a'], ['фукси', '#e0218a'], ['пыльная роза', '#c48a92'],
-  ['пудров', '#e6bcc3'], ['розов', '#e28ab4'], ['лилов', '#b57edc'],
-  ['лаванд', '#b7a5e0'], ['сиренев', '#a98ae0'], ['фиолетов', '#7c4dcc'],
-  ['пурпурн', '#7a2f7a'], ['баклажан', '#4a2340'], ['слив', '#5d3a6b'],
-  // на всякий случай английские названия
+  ['пудров', '#e6bcc3', 'пудровый', 'Розовые и фиолетовые'],
+  ['розов', '#e28ab4', 'розовый', 'Розовые и фиолетовые'],
+  ['пыльная роза', '#c48a92', 'пыльная роза', 'Розовые и фиолетовые'],
+  ['фуксия', '#e0218a', 'фуксия', 'Розовые и фиолетовые'],
+  ['фукси', '#e0218a'],
+  ['лаванд', '#b7a5e0', 'лавандовый', 'Розовые и фиолетовые'],
+  ['лилов', '#b57edc', 'лиловый', 'Розовые и фиолетовые'],
+  ['сиренев', '#a98ae0', 'сиреневый', 'Розовые и фиолетовые'],
+  ['фиолетов', '#7c4dcc', 'фиолетовый', 'Розовые и фиолетовые'],
+  ['пурпурн', '#7a2f7a', 'пурпурный', 'Розовые и фиолетовые'],
+  ['слив', '#5d3a6b', 'сливовый', 'Розовые и фиолетовые'],
+  ['баклажан', '#4a2340', 'баклажан', 'Розовые и фиолетовые'],
+  // английские названия — на случай, если так записали в карточке
   ['white', '#f4f6fa'], ['black', '#20242c'], ['grey', '#9aa3b0'], ['gray', '#9aa3b0'],
   ['navy', '#16326b'], ['blue', '#2456b8'], ['teal', '#2e9d9a'], ['green', '#2c8a52'],
   ['red', '#cf3030'], ['pink', '#e28ab4'], ['purple', '#7c4dcc'], ['beige', '#d9c7a7'],
-].sort((a, b) => b[0].length - a[0].length);   // длинные основы проверяем первыми
+];
+
+// Длинные основы проверяем первыми, иначе «син» перехватит «синий» у «тёмно-синего».
+const SWATCH_LOOKUP = [...SWATCHES].sort((a, b) => b[0].length - a[0].length);
 
 function swatchFor(color) {
   const s = String(color || '').toLowerCase().trim();
   if (!s) return 'var(--border-strong)';
-  const hit = SWATCHES.find(([stem]) => s.startsWith(stem) || s.includes(' ' + stem));
+  const hit = SWATCH_LOOKUP.find(([stem]) => s.startsWith(stem) || s.includes(' ' + stem));
   return hit ? hit[1] : 'var(--border-strong)';
 }
 
@@ -180,15 +239,24 @@ let popContext = null;
 function openReasonPopover(anchor, product, size, direction) {
   const row = product.sizes.find((s) => s.size === size) || {};
   const alt = (row.alt_1c || '').trim();
+  const held = row.blocked_qty || 0;
+  const available = Math.max(0, (row.qty || 0) - held);
   const stop = product.blocked
     ? (product.block_note || 'товар снят с продажи')
-    : (row.blocked ? (row.block_note || 'размер снят с продажи') : '');
+    : (held && available === 0
+        ? `все ${held} шт сняты с продажи` + (row.block_note ? ': ' + row.block_note : '')
+        : '');
+  const partial = !product.blocked && held && available > 0
+    ? `Снято с продажи ${held} шт из ${row.qty}. Доступно к продаже: ${available}.`
+      + (row.block_note ? ' ' + row.block_note : '')
+    : '';
   popContext = { product, size, direction };
 
   const label = isSouvenir(product) ? product.title : `${product.title}, размер ${size}`;
   const head = direction > 0 ? 'Прибавить' : direction < 0 ? 'Убавить' : 'Изменить остаток';
   $('#popTitle').innerHTML = `<b>${esc(head)}</b> · ${esc(label)}`
     + (stop ? `<div class="pop__stop"><b>Снят с продажи.</b> ${esc(stop)}</div>` : '')
+    + (partial ? `<div class="pop__stop">${esc(partial)}</div>` : '')
     + (alt ? `<div class="pop__alt"><b>Пересорт.</b> Пробивать в кассе как:<br>${esc(alt)}
               ${row.alt_note ? `<span class="muted">${esc(row.alt_note)}</span>` : ''}</div>` : '');
   $('#popQty').value = 1;
@@ -348,8 +416,8 @@ function visibleProducts() {
     // Фильтр по размерам — про одежду: сувенирку он прячет.
     if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
     if (f.no1c && !p.needs_1c) return false;
-    if (f.blocked && !p.blocked && !p.blocked_sizes) return false;
-    if (f.lowOnly && !shownSizes(p).some((s) => s.qty <= low)) return false;
+    if (f.blocked && !p.blocked && !p.blocked_qty) return false;
+    if (f.lowOnly && !shownSizes(p).some((s) => ['size--zero', 'size--low'].includes(stockClass(s.qty, p)))) return false;
     if (needle) {
       const hay = `${p.kind} ${p.color} ${p.print_name} ${p.material} ${p.note} ${p.name_1c}`.toLowerCase();
       if (!needle.split(/\s+/).every((word) => hay.includes(word))) return false;
@@ -367,8 +435,16 @@ function sortComparator() {
 function renderFilters() {
   const { facets, categories } = state.data;
   const f = state.filters;
-  const cats = Object.entries(categories).map(([id, label]) =>
-    `<button class="chip ${f.category === id ? 'is-active' : ''}" data-filter="category" data-value="${id}">${esc(label)}</button>`).join('');
+
+  // Категория — не такой же фильтр, как остальные: это главное деление товара,
+  // поэтому отдельная строка и вид переключателя, а не чипа.
+  const counts = { '': state.data.products.length };
+  state.data.products.forEach((p) => { counts[p.category] = (counts[p.category] || 0) + 1; });
+  const cat = (id, label) => `<button class="cat ${f.category === id ? 'is-active' : ''}"
+      data-cat="${id}">${esc(label)}<span class="cat__n">${counts[id] || 0}</span></button>`;
+  $('#cats').innerHTML = cat('', 'Всё вместе')
+    + Object.entries(categories).map(([id, label]) => cat(id, label)).join('');
+
   const kinds = facets.kinds.map((k) =>
     `<button class="chip ${f.kind === k ? 'is-active' : ''}" data-filter="kind" data-value="${esc(k)}">${esc(k)}</button>`).join('');
   const sel = (name, label, values, current) => values.length
@@ -376,7 +452,7 @@ function renderFilters() {
          <option value="">${label}</option>
          ${values.map((v) => `<option value="${esc(v)}" ${current === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
        </select>` : '';
-  $('#filters').innerHTML = cats + '<span class="filters__sep"></span>' + kinds
+  $('#filters').innerHTML = kinds
     + sel('color', 'Любой цвет', facets.colors, f.color)
     + sel('print', 'Любой принт', facets.prints, f.print)
     + `<button class="chip chip--danger ${f.lowOnly ? 'is-active' : ''}" data-filter="lowOnly">Заканчивается</button>`
@@ -397,22 +473,29 @@ function renderFilters() {
     || f.sizes.length || f.lowOnly || f.no1c || f.blocked || f.q);
 }
 
-function sizeClass(qty, low) {
+// Подсветка остатка. Ноль всегда красный. Жёлтый «мало» — только у сувенирки:
+// у одежды одна-две штуки размера это норма. Зелёный — когда товара с запасом.
+function stockClass(qty, product) {
+  const t = state.data.settings;
   if (qty <= 0) return 'size--zero';
-  if (qty <= low) return 'size--low';
-  return '';
+  if (isSouvenir(product)) {
+    if (qty <= t.low_souvenir) return 'size--low';
+    if (qty >= t.high_souvenir) return 'size--high';
+    return '';
+  }
+  return qty >= t.high_clothing ? 'size--high' : '';
 }
 
 function renderStock() {
   renderFilters();
-  const low = state.data.settings.low_stock;
   const grid = $('#productGrid');
   const items = visibleProducts();
 
   $('#stockLegend').innerHTML = state.data.products.length ? `
     <span><b>${items.length}</b> ${plural(items.length, 'модель', 'модели', 'моделей')} на экране</span>
     <span><span class="dot" style="background:var(--danger)"></span>0 шт — закончилось</span>
-    <span><span class="dot" style="background:var(--warn)"></span>≤ ${low} шт — пора заказывать</span>
+    <span><span class="dot" style="background:var(--warn)"></span>сувенирка ≤ ${state.data.settings.low_souvenir} шт — пора заказывать</span>
+    <span><span class="dot" style="background:var(--ok)"></span>с запасом</span>
     ${state.filters.sizes.length
       ? `<span><b>${state.filters.sizes.join(', ')}</b> — показаны только эти размеры</span>` : ''}
     <span class="legend__tip">Кнопки − и + под числом спросят причину операции.</span>` : '';
@@ -439,20 +522,20 @@ function renderStock() {
 }
 
 function renderRow(p) {
-  const low = state.data.settings.low_stock;
   const rows = shownSizes(p);
   const souvenir = isSouvenir(p);
   const cells = rows.map((s) => {
-    const stop = p.blocked || s.blocked;
+    const held = s.blocked_qty || 0;
+    const stop = p.blocked || (held > 0 && held >= s.qty);
     const hint = [
       souvenir ? p.title : `размер ${s.size}`,
       s.alt_1c ? 'пересорт: ' + s.alt_1c : '',
-      s.blocked ? 'снят с продажи' : '',
+      held ? `снято с продажи ${held} из ${s.qty}` : '',
     ].filter(Boolean).join(' · ');
-    return `<button class="scell ${sizeClass(s.qty, low)} ${s.alt_1c ? 'scell--alt' : ''} ${stop ? 'scell--stop' : ''}"
+    return `<button class="scell ${stockClass(s.qty, p)} ${s.alt_1c ? 'scell--alt' : ''} ${stop ? 'scell--stop' : ''}"
         data-product="${p.id}" data-size="${esc(s.size)}" data-act="both" title="${esc(hint)}">
       ${souvenir ? '' : `<span class="scell__size">${esc(s.size)}</span>`}
-      <b>${s.qty}</b></button>`;
+      <b>${s.qty}</b>${held ? `<i class="scell__held" title="снято с продажи ${held} шт">−${held}</i>` : ''}</button>`;
   }).join('');
 
   return `<div class="rowitem ${p.blocked ? 'is-stopped' : ''} ${p.total === 0 ? 'is-empty' : ''}">
@@ -460,7 +543,7 @@ function renderRow(p) {
     <div class="rowitem__main">
       <span class="rowitem__title">${esc(p.title)}</span>
       ${p.blocked ? '<span class="tag tag--stop">снят с продажи</span>' : ''}
-      ${!p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">стоп: ${p.blocked_sizes}</span>` : ''}
+      ${!p.blocked && p.blocked_qty ? `<span class="tag tag--stop">стоп: ${p.blocked_qty} шт</span>` : ''}
       ${p.needs_1c ? '<span class="tag tag--warn">нет в 1С</span>' : ''}
       ${p.overrides ? '<span class="tag tag--alt">пересорт</span>' : ''}
     </div>
@@ -471,22 +554,23 @@ function renderRow(p) {
   </div>`;
 }
 
-function tile(product, s, low, showLabel) {
+function tile(product, s, showLabel) {
   const alt = (s.alt_1c || '').trim();
-  const stop = product.blocked || s.blocked;
+  const held = s.blocked_qty || 0;
+  const stop = product.blocked || (held > 0 && held >= s.qty);
   const where = `${esc(product.title)}${showLabel ? ', размер ' + esc(s.size) : ''}`;
   const hints = [
     alt ? 'Пересорт — продавать в кассе как: ' + alt : '',
-    s.blocked ? 'Снят с продажи' + (s.block_note ? ': ' + s.block_note : '') : '',
+    held ? `Снято с продажи ${held} шт из ${s.qty}` + (s.block_note ? ': ' + s.block_note : '') : '',
   ].filter(Boolean).join('\n');
   return `
-    <div class="size ${sizeClass(s.qty, low)} ${alt ? 'size--alt' : ''} ${stop ? 'size--stop' : ''}"
+    <div class="size ${stockClass(s.qty, product)} ${alt ? 'size--alt' : ''} ${stop ? 'size--stop' : ''}"
          data-product="${product.id}" data-size="${esc(s.size)}"
          ${hints ? `title="${esc(hints)}"` : ''}>
       ${showLabel ? `<div class="size__label">${esc(s.size)}</div>` : ''}
       <div class="size__qty" aria-label="${where}: ${s.qty} шт">${s.qty}
         ${alt ? '<span class="size__alt">1С</span>' : ''}
-        ${s.blocked ? '<span class="size__stop" title="Размер снят с продажи">стоп</span>' : ''}</div>
+        ${held ? `<span class="size__stop" title="Снято с продажи ${held} шт">−${held}</span>` : ''}</div>
       <div class="size__ctl">
         <button data-act="minus" title="Убавить: продажа, брак, случайный клик" ${s.qty <= 0 ? 'disabled' : ''}>−</button>
         <button data-act="plus" title="Прибавить: поставка, возврат">+</button>
@@ -495,15 +579,14 @@ function tile(product, s, low, showLabel) {
 }
 
 function renderCard(p) {
-  const low = state.data.settings.low_stock;
   const swatch = swatchFor(p.color);
   const souvenir = isSouvenir(p);
   const rows = shownSizes(p);
   const partial = !souvenir && rows.length < p.sizes.length;
   const body = souvenir
-    ? `<div class="sizes sizes--single">${tile(p, p.sizes[0] || { size: '—', qty: 0 }, low, false)}
+    ? `<div class="sizes sizes--single">${tile(p, p.sizes[0] || { size: '—', qty: 0 }, false)}
          <div class="single-hint">Сувенир — без размеров</div></div>`
-    : `<div class="sizes">${rows.map((s) => tile(p, s, low, true)).join('')}</div>`;
+    : `<div class="sizes">${rows.map((s) => tile(p, s, true)).join('')}</div>`;
   const shownQty = rows.reduce((sum, s) => sum + s.qty, 0);
 
   const flags = [
@@ -512,7 +595,7 @@ function renderCard(p) {
         title="Продажи, которые ещё не пробиты в кассе">${p.unpunched} не пробито</span>` : '',
     p.overrides ? `<span class="tag tag--alt" title="Размеры, которые пробиваются под другим наименованием 1С">Пересорт: ${p.overrides}</span>` : '',
     p.blocked ? `<span class="tag tag--stop">Снят с продажи${p.block_note ? ': ' + esc(p.block_note) : ''}</span>` : '',
-    !p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">Снято с продажи размеров: ${p.blocked_sizes}</span>` : '',
+    !p.blocked && p.blocked_qty ? `<span class="tag tag--stop">Снято с продажи: ${p.blocked_qty} шт</span>` : '',
   ].join('');
 
   return `<article class="card ${p.total === 0 ? 'is-empty' : ''} ${p.blocked ? 'is-stopped' : ''}">
@@ -541,7 +624,7 @@ function renderCard(p) {
     <div class="card__foot">
       ${souvenir ? '' : `<button class="btn btn--sm" data-batch="${p.id}">Поставка партии</button>`}
       <button class="btn btn--sm" data-batch="${p.id}" data-inventory="1">Пересчитать</button>
-      <button class="btn btn--sm ${p.overrides || p.blocked_sizes ? 'btn--alt' : ''}" data-alt="${p.id}"
+      <button class="btn btn--sm ${p.overrides || p.blocked_qty ? 'btn--alt' : ''}" data-alt="${p.id}"
               title="Пересорт в 1С и запрет продажи по размерам">Отметки размеров</button>
       <button class="btn btn--ghost btn--sm" data-history="${p.id}">История</button>
       <button class="btn btn--ghost btn--sm" data-edit-stock="${p.id}">Карточка</button>
@@ -564,8 +647,8 @@ function applyQty(productId, size, qty, direction) {
   if (tileEl) {
     const box = tileEl.querySelector('.size__qty');
     box.childNodes[0].nodeValue = qty;
-    tileEl.classList.remove('size--zero', 'size--low');
-    const cls = sizeClass(qty, state.data.settings.low_stock);
+    tileEl.classList.remove('size--zero', 'size--low', 'size--high');
+    const cls = stockClass(qty, product);
     if (cls) tileEl.classList.add(cls);
     tileEl.querySelector('[data-act="minus"]').disabled = qty <= 0;
     flash(tileEl, direction);
@@ -573,8 +656,8 @@ function applyQty(productId, size, qty, direction) {
   const cell = $(`.scell${sel}`);
   if (cell) {
     cell.querySelector('b').textContent = qty;
-    cell.classList.remove('size--zero', 'size--low');
-    const cls = sizeClass(qty, state.data.settings.low_stock);
+    cell.classList.remove('size--zero', 'size--low', 'size--high');
+    const cls = stockClass(qty, product);
     if (cls) cell.classList.add(cls);
     flash(cell, direction);
   }
@@ -665,11 +748,13 @@ function openMarks(productId) {
   if (!product) return;
   const souvenir = isSouvenir(product);
   const rows = product.sizes.map((s) => `
-    <div class="markrow ${s.blocked ? 'is-stopped' : ''}">
-      <span class="markrow__size">${souvenir ? 'Весь товар' : esc(s.size)}</span>
-      <label class="markrow__stop" title="Временно не продавать этот размер">
-        <input type="checkbox" data-block="${esc(s.size)}" ${s.blocked ? 'checked' : ''}>
-        <span>не продавать</span>
+    <div class="markrow ${s.blocked_qty ? 'is-stopped' : ''}">
+      <span class="markrow__size">${souvenir ? 'Весь товар' : esc(s.size)}
+        <i>${s.qty} шт</i></span>
+      <label class="markrow__stop" title="Сколько отдельных экземпляров сейчас нельзя продать">
+        <span>снято, шт</span>
+        <input type="number" min="0" max="${s.qty}" data-block="${esc(s.size)}"
+               value="${s.blocked_qty || 0}">
       </label>
       <input type="text" data-blocknote="${esc(s.size)}" value="${esc(s.block_note || '')}"
              placeholder="почему снят" class="markrow__note">
@@ -681,8 +766,10 @@ function openMarks(productId) {
 
   openModal({
     title: `Отметки размеров: ${product.title}`,
-    body: `<p class="hint"><b>Не продавать</b> — размер временно снят с продажи: приход и
-        списание брака остаются доступны, а продажу приложение не даст провести.<br>
+    body: `<p class="hint"><b>Снято, шт</b> — сколько отдельных экземпляров этого размера
+        сейчас нельзя продать: например, одна толстовка L испачкана или отложена.
+        Остальные того же размера продаются как обычно. Приход и списание брака
+        остаются доступны в любом случае.<br>
         <b>Пересорт</b> — размер пробивается в кассе под другим наименованием 1С.
         Пустое поле означает, что товар пробивается как обычно${
           product.name_1c ? `: <b>${esc(product.name_1c)}</b>` : ' (наименование товара не заполнено)'}.</p>
@@ -700,7 +787,7 @@ function openMarks(productId) {
             items[name.dataset.size] = {
               name_1c: name.value,
               note: r.querySelector('[data-note]').value,
-              blocked: r.querySelector('[data-block]').checked,
+              blocked_qty: Number(r.querySelector('[data-block]').value) || 0,
               block_note: r.querySelector('[data-blocknote]').value,
             };
           });
@@ -1049,7 +1136,7 @@ async function renderCatalog() {
       <td style="font-weight:600">${esc(p.title)}
         ${p.archived ? '<span class="tag">архив</span>' : ''}
         ${p.blocked ? `<span class="tag tag--stop">снят с продажи</span>` : ''}
-        ${!p.blocked && p.blocked_sizes ? `<span class="tag tag--stop">стоп: ${p.blocked_sizes}</span>` : ''}
+        ${!p.blocked && p.blocked_qty ? `<span class="tag tag--stop">стоп: ${p.blocked_qty} шт</span>` : ''}
         ${p.link ? `<a class="card__link" href="${esc(p.link)}" target="_blank" rel="noopener">↗</a>` : ''}</td>
       <td>${esc(state.data.categories[p.category] || p.category)}</td>
       <td class="muted">${esc(p.material) || '—'}</td>
@@ -1175,7 +1262,9 @@ function openProductForm(product, category) {
 /* ---------- Вкладка «Настройки» ---------- */
 
 function renderSettings() {
-  $('#lowStock').value = state.data.settings.low_stock;
+  $('#highClothing').value = state.data.settings.high_clothing;
+  $('#lowSouvenir').value = state.data.settings.low_souvenir;
+  $('#highSouvenir').value = state.data.settings.high_souvenir;
   $('#deadDays').value = state.data.settings.dead_days;
   $('#sellerList').innerHTML = state.data.sellers.length
     ? state.data.sellers.map((s) => `
@@ -1196,6 +1285,134 @@ function showFarewell() {
   </div>`;
 }
 
+/* ---------- Справка ---------- */
+
+const HELP_SECTIONS = [
+  ['Как менять остаток', `
+    <p>Число на плитке — просто подпись, нажать на него нельзя: так не получится
+       случайно списать товар мышью. Остаток меняют кнопки <b>−</b> и <b>+</b> под числом,
+       каждая спрашивает причину и количество.</p>
+    <ul>
+      <li><b>+</b> — Поставка (пришла партия) · Возврат (покупатель вернул товар)</li>
+      <li><b>−</b> — Продажа · Брак (товар испорчен) · Случайный клик (исправление)</li>
+    </ul>
+    <p>Ошиблись — нажмите «Отменить» во всплывающем уведомлении или «Откатить» в журнале:
+       остаток вернётся, а в журнале останется след обеих операций.</p>
+    <p>На карточке одежды есть «Поставка партии» — ввод сразу по всем размерам одной
+       накладной, и «Пересчитать» для инвентаризации.</p>`],
+
+  ['Категории и размеры', `
+    <p>Товар делится на <b>одежду</b> (есть размерный ряд и материал) и
+       <b>сувенирную продукцию</b> (один общий счётчик без размеров). Переключатель
+       категорий — самая верхняя строка на вкладке «Остатки».</p>
+    <p>Готовые размерные ряды: российские 42–56, буквенные XXS–3XL и OS (один размер).
+       Свой ряд вписывается через запятую в карточке товара.</p>
+    <p>Строка «Размеры» под фильтрами показывает только выбранные размеры — можно
+       отметить сразу несколько, например 42 и 44.</p>`],
+
+  ['Подсветка остатков', `
+    <ul>
+      <li><span class="help-dot" style="background:var(--danger)"></span>
+          <b>красный</b> — 0 шт, закончилось;</li>
+      <li><span class="help-dot" style="background:var(--warn)"></span>
+          <b>жёлтый</b> — мало, <b>только у сувенирной продукции</b>: у одежды
+          одна-две штуки размера это норма, а не повод для тревоги;</li>
+      <li><span class="help-dot" style="background:var(--ok)"></span>
+          <b>зелёный</b> — товара с запасом, и у одежды, и у сувенирки.</li>
+    </ul>
+    <p>Пороги настраиваются на вкладке «Настройки» — отдельно для одежды и сувенирки.</p>`],
+
+  ['Наименование в 1С и «Не пробито»', `
+    <p>Если у товара не заполнено наименование в 1С, каждая его продажа помечается как
+       <b>не пробитая в кассе</b> — так бывает, когда оплату приняли раньше, чем товар
+       можно провести через кассу.</p>
+    <p>Вкладка <b>«Не пробито»</b> показывает все такие продажи: сколько их, на какую
+       сумму, по каким товарам и в чью смену. Пробили чек — нажмите «Пробито» у записи
+       или «Пробито всё» у товара.</p>`],
+
+  ['Пересорт и стоп-продажа', `
+    <p><b>Пересорт</b> — размер пробивается в кассе под другим наименованием 1С.
+       Задаётся кнопкой «Отметки размеров»; такой размер помечен значком <b>1С</b>, а перед
+       списанием меню напомнит, под каким именем пробивать.</p>
+    <p><b>Снять с продажи весь товар</b> — флажок и причина в карточке товара.
+       Карточка станет полосатой, а пункт «Продажа» в меню будет недоступен.</p>
+    <p><b>Снять с продажи отдельные экземпляры</b> — там же, в «Отметках размеров»,
+       поле «снято, шт». Например, из пяти толстовок L одна испачкана: ставим 1, и
+       продать можно будет только четыре. На плитке появится метка <b>−1</b>.</p>
+    <p>Приход, возврат, брак и коррекции работают всегда — запрет касается только продажи.</p>`],
+
+  ['Желания, журнал и корзина', `
+    <p><b>Желания</b> — что спрашивали покупатели, но чего не было: товар, дата,
+       контакты клиента и продавец. У заявки есть статус: ждёт / клиенту сообщили / закрыта.</p>
+    <p><b>Журнал</b> хранит все операции и правки справочника: когда, кто, что и на какую
+       сумму. Ненужную запись можно удалить в корзину; если она ещё учтена в остатках,
+       приложение предложит сначала откатить операцию. Из корзины запись возвращается
+       обратно, а через 60 дней удаляется сама.</p>`],
+
+  ['Отчёты', `
+    <ul>
+      <li><b>Что продаётся</b> — штуки, выручка и на сколько дней хватит остатка;</li>
+      <li><b>Какие размеры вымываются первыми</b> — доля размера в продажах против доли
+          в остатке, только по одежде;</li>
+      <li><b>Пора заказывать</b> — что вот-вот кончится, с оценкой на месяц вперёд;</li>
+      <li><b>Лежит без движения</b> — товар, который давно не продавался, и сколько
+          в нём заморожено денег.</li>
+    </ul>`],
+
+  ['Данные и завершение работы', `
+    <p>Вся база — один файл <code>data/merch.db</code> рядом с программой. Для бэкапа
+       скопируйте папку <code>data</code> при закрытом приложении.</p>
+    <p>Кнопка <b>«Завершить работу»</b> в шапке закрывает приложение. Данные сохраняются
+       сразу после каждой операции, поэтому закрывать можно в любой момент.</p>`],
+];
+
+function openHelp(tab = 'guide') {
+  const guide = HELP_SECTIONS.map(([title, html]) =>
+    `<section class="help-sec"><h3>${esc(title)}</h3>${html}</section>`).join('');
+
+  const groups = [];
+  SWATCHES.filter((e) => e[2]).forEach(([, hex, label, group]) => {
+    let g = groups.find((x) => x.name === group);
+    if (!g) groups.push((g = { name: group, items: [] }));
+    g.items.push({ hex, label });
+  });
+  const colors = `
+    <p class="hint">Полоска слева от названия товара красится по слову в поле «Цвет».
+       Окончание не важно: «фиолетовый», «фиолетовая» и «фиолетовые» дадут один оттенок.
+       Если слово незнакомое, полоска остаётся серой — на учёт это никак не влияет.</p>
+    ${groups.map((g) => `
+      <section class="help-sec">
+        <h3>${esc(g.name)}</h3>
+        <div class="colorgrid">${g.items.map((c) => `
+          <div class="colorgrid__item">
+            <span class="colorgrid__chip" style="background:${c.hex}"></span>
+            <span>${esc(c.label)}</span>
+          </div>`).join('')}</div>
+      </section>`).join('')}`;
+
+  openModal({
+    title: 'Справка',
+    body: `<div class="helptabs" id="helpTabs">
+        <button data-help="guide" class="${tab === 'guide' ? 'is-active' : ''}">Как работать</button>
+        <button data-help="colors" class="${tab === 'colors' ? 'is-active' : ''}">Гайд по цветам</button>
+      </div>
+      <div class="help" id="helpGuide" ${tab === 'guide' ? '' : 'hidden'}>${guide}</div>
+      <div class="help" id="helpColors" ${tab === 'colors' ? '' : 'hidden'}>${colors}</div>`,
+    onOpen: (box) => {
+      box.querySelector('#helpTabs').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-help]');
+        if (!btn) return;
+        box.querySelectorAll('#helpTabs button').forEach((b) =>
+          b.classList.toggle('is-active', b === btn));
+        box.querySelector('#helpGuide').hidden = btn.dataset.help !== 'guide';
+        box.querySelector('#helpColors').hidden = btn.dataset.help !== 'colors';
+        box.parentElement.scrollTop = 0;
+      });
+    },
+    buttons: [{ label: 'Закрыть', className: 'btn--primary', onClick: (close) => close() }],
+  });
+}
+
 /* ---------- События ---------- */
 
 function bind() {
@@ -1204,10 +1421,19 @@ function bind() {
     if (btn) setTab(btn.dataset.tab);
   });
   $('#sellerSelect').addEventListener('change', (e) => {
-    state.seller = e.target.value;
+    const next = e.target.value;
+    // Смена продавца влияет на весь журнал дальше, поэтому спрашиваем подтверждение.
+    if (next && next !== state.seller
+        && !confirm(`Передать смену: ${next}?\n\nВсе следующие операции будут записаны на это имя.`)) {
+      e.target.value = state.seller;
+      return;
+    }
+    state.seller = next;
     localStorage.setItem('merch.seller', state.seller);
     $('#wSeller').value = state.seller;
+    if (next) toast(`Смена: <b>${esc(next)}</b>`);
   });
+  $('#helpBtn').addEventListener('click', () => openHelp());
   $('#themeBtn').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
@@ -1231,6 +1457,12 @@ function bind() {
       const at = picked.indexOf(size);
       if (at === -1) picked.push(size); else picked.splice(at, 1);
     }
+    renderStock();
+  });
+  $('#cats').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cat]');
+    if (!btn) return;
+    state.filters.category = btn.dataset.cat;
     renderStock();
   });
   $('#filters').addEventListener('click', (e) => {
@@ -1548,7 +1780,9 @@ function bind() {
   $('#saveSettings').addEventListener('click', async () => {
     try {
       await apiPost('/api/settings', {
-        low_stock: Number($('#lowStock').value) || 0,
+        high_clothing: Math.max(1, Number($('#highClothing').value) || 5),
+        low_souvenir: Math.max(0, Number($('#lowSouvenir').value) || 0),
+        high_souvenir: Math.max(1, Number($('#highSouvenir').value) || 15),
         dead_days: Number($('#deadDays').value) || 30,
       });
       await reload();
