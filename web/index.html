@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Мерч НГУ — учёт товара</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__brand">
+    <span class="topbar__mark">НГУ</span>
+    <span class="topbar__name">Мерч<span class="topbar__sub">учёт товара</span></span>
+  </div>
+
+  <div class="modes" id="modes" role="group" aria-label="Режим работы">
+    <button class="mode" data-mode="sale"><span class="mode__ico">₽</span>Продажа</button>
+    <button class="mode" data-mode="receipt"><span class="mode__ico">↓</span>Приёмка</button>
+    <button class="mode" data-mode="fix"><span class="mode__ico">✎</span>Коррекция</button>
+  </div>
+
+  <div class="topbar__right">
+    <label class="seller">
+      <span class="seller__label">Смена</span>
+      <select id="sellerSelect" aria-label="Продавец"></select>
+    </label>
+    <button class="icon-btn" id="themeBtn" title="Светлая / тёмная тема">◐</button>
+  </div>
+</header>
+
+<div class="mode-banner" id="modeBanner"></div>
+
+<nav class="tabs" id="tabs">
+  <button class="tab" data-tab="stock">Остатки</button>
+  <button class="tab" data-tab="journal">Журнал</button>
+  <button class="tab" data-tab="reports">Отчёты</button>
+  <button class="tab" data-tab="catalog">Товары</button>
+  <button class="tab" data-tab="settings">Настройки</button>
+</nav>
+
+<main>
+  <!-- ОСТАТКИ -->
+  <section class="view" id="view-stock">
+    <div class="toolbar">
+      <div class="search">
+        <span class="search__ico">⌕</span>
+        <input id="search" type="search" placeholder="Поиск: толстовка фиолетовая, герб…" autocomplete="off">
+        <kbd class="search__kbd">/</kbd>
+      </div>
+      <div class="filters" id="filters"></div>
+      <button class="btn btn--ghost" id="resetFilters" hidden>Сбросить</button>
+    </div>
+    <div class="legend" id="stockLegend"></div>
+    <div class="grid" id="productGrid"></div>
+  </section>
+
+  <!-- ЖУРНАЛ -->
+  <section class="view" id="view-journal" hidden>
+    <div class="toolbar toolbar--wrap">
+      <div class="search search--sm">
+        <span class="search__ico">⌕</span>
+        <input id="journalSearch" type="search" placeholder="Товар, продавец, комментарий…" autocomplete="off">
+      </div>
+      <select id="journalKind" class="select"></select>
+      <select id="journalSeller" class="select"></select>
+      <label class="field field--inline">с <input type="date" id="journalFrom"></label>
+      <label class="field field--inline">по <input type="date" id="journalTo"></label>
+      <button class="btn btn--ghost" id="journalReset">Сбросить</button>
+      <a class="btn btn--ghost" id="journalExport" href="/api/export/movements.csv">Выгрузить CSV</a>
+      <span id="journalFocus"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="journalTable">
+        <thead>
+          <tr>
+            <th>Когда</th><th>Операция</th><th>Товар</th><th class="ta-c">Размер</th>
+            <th class="ta-c">Штук</th><th class="ta-r">Сумма</th><th>Продавец</th>
+            <th>Комментарий</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="journalBody"></tbody>
+      </table>
+    </div>
+    <div class="pager" id="journalPager"></div>
+  </section>
+
+  <!-- ОТЧЁТЫ -->
+  <section class="view" id="view-reports" hidden>
+    <div class="toolbar">
+      <div class="periods" id="periods">
+        <button class="chip" data-days="7">7 дней</button>
+        <button class="chip" data-days="30">30 дней</button>
+        <button class="chip" data-days="90">90 дней</button>
+        <button class="chip" data-days="365">Год</button>
+      </div>
+      <label class="field field--inline">с <input type="date" id="repFrom"></label>
+      <label class="field field--inline">по <input type="date" id="repTo"></label>
+      <select id="repKind" class="select"></select>
+      <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
+    </div>
+    <div id="reportBody"></div>
+  </section>
+
+  <!-- ТОВАРЫ -->
+  <section class="view" id="view-catalog" hidden>
+    <div class="toolbar">
+      <button class="btn btn--primary" id="addProduct">+ Новая модель</button>
+      <label class="switch"><input type="checkbox" id="showArchived"><span></span>Показывать архив</label>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Модель</th><th>Тип</th><th>Цвет</th><th>Принт</th><th class="ta-r">Цена</th>
+              <th class="ta-c">Размеры</th><th class="ta-c">Остаток</th><th></th></tr>
+        </thead>
+        <tbody id="catalogBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- НАСТРОЙКИ -->
+  <section class="view" id="view-settings" hidden>
+    <div class="cards2">
+      <div class="panel">
+        <h2 class="panel__title">Продавцы</h2>
+        <p class="panel__hint">Кто в смене — то имя и попадёт в журнал.</p>
+        <ul class="sellers" id="sellerList"></ul>
+        <form class="row" id="sellerForm">
+          <input type="text" id="sellerName" placeholder="Имя продавца" autocomplete="off">
+          <button class="btn btn--primary" type="submit">Добавить</button>
+        </form>
+      </div>
+      <div class="panel">
+        <h2 class="panel__title">Пороги</h2>
+        <p class="panel__hint">По ним подсвечиваются остатки и считаются отчёты.</p>
+        <label class="field">Мало на складе, шт (жёлтая подсветка)
+          <input type="number" id="lowStock" min="0" max="99">
+        </label>
+        <label class="field">Считать залежавшимся после, дней
+          <input type="number" id="deadDays" min="1" max="999">
+        </label>
+        <button class="btn btn--primary" id="saveSettings">Сохранить</button>
+      </div>
+      <div class="panel">
+        <h2 class="panel__title">Данные</h2>
+        <p class="panel__hint">База лежит в файле <code>data/merch.db</code> рядом с программой. Копируйте его, чтобы сделать бэкап.</p>
+        <div class="row">
+          <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
+          <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true">
+    <div class="modal__head">
+      <h2 id="modalTitle"></h2>
+      <button class="icon-btn" data-close aria-label="Закрыть">✕</button>
+    </div>
+    <div class="modal__body" id="modalBody"></div>
+    <div class="modal__foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
