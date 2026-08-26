@@ -234,6 +234,12 @@
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>
           <a class="btn btn--ghost" href="/api/export/wishes.csv">Желания в CSV</a>
         </div>
+        <div class="danger">
+          <p class="panel__hint">Очистка журнала стирает всю историю операций и корзину.
+            Остатки при этом не меняются, но разобраться в расхождениях будет уже нечем —
+            сначала скачайте бэкап.</p>
+          <button class="btn btn--danger" id="clearJournal">Очистить журнал</button>
+        </div>
       </div>
     </div>
   </section>
@@ -243,6 +249,11 @@
   <div class="pop__title" id="popTitle"></div>
   <label class="pop__qty">Штук <input type="number" id="popQty" min="1" max="100000" value="1"></label>
   <div class="pop__list" id="popList"></div>
+</div>
+
+<div class="pop pop--menu" id="rowMenu" hidden>
+  <div class="pop__title" id="rowMenuTitle"></div>
+  <div class="pop__list" id="rowMenuList"></div>
 </div>
 
 <div class="toasts" id="toasts"></div>

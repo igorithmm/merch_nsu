@@ -387,6 +387,8 @@ function openReasonPopover(anchor, product, size, direction) {
   const label = isSouvenir(product) ? product.title : `${product.title}, размер ${size}`;
   const head = direction > 0 ? 'Прибавить' : direction < 0 ? 'Убавить' : 'Изменить остаток';
   $('#popTitle').innerHTML = `<b>${esc(head)}</b> · ${esc(label)}`
+    + (product.attention
+        ? `<div class="pop__note"><b>❗ Обратите внимание.</b> ${esc(product.attention)}</div>` : '')
     + (stop ? `<div class="pop__stop"><b>Снят с продажи.</b> ${esc(stop)}</div>` : '')
     + (partial ? `<div class="pop__stop">${esc(partial)}</div>` : '')
     + (alt ? `<div class="pop__alt"><b>Пересорт.</b> Пробивать в кассе как:<br>${esc(alt)}
@@ -406,7 +408,10 @@ function openReasonPopover(anchor, product, size, direction) {
     ? group('Списать', state.data.minus_reasons) + group('Добавить', state.data.plus_reasons)
     : (direction > 0 ? state.data.plus_reasons : state.data.minus_reasons).map(item).join('');
 
-  const pop = $('#pop');
+  placePopover($('#pop'), anchor);
+}
+
+function placePopover(pop, anchor) {
   pop.hidden = false;
   const box = anchor.getBoundingClientRect();
   const width = pop.offsetWidth;
@@ -554,8 +559,10 @@ function visibleProducts() {
     if (f.kind && p.kind !== f.kind) return false;
     if (f.color && colorKey(p.color) !== f.color) return false;
     if (f.print && p.print_name !== f.print) return false;
-    // Фильтр по размерам — про одежду: сувенирку он прячет.
-    if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
+    // Фильтр по размерам — про одежду: сувенирку он прячет. Показываем только
+    // те модели, где выбранный размер действительно есть в наличии.
+    if (f.sizes.length
+        && (isSouvenir(p) || !shownSizes(p).some((s) => s.qty > 0))) return false;
     if (f.no1c && !p.needs_1c) return false;
     if (f.blocked && !p.blocked && !p.blocked_qty) return false;
     if (f.lowOnly && !shownSizes(p).some((s) => ['size--zero', 'size--low'].includes(stockClass(s.qty, p, s)))) return false;
@@ -732,13 +739,14 @@ function renderRow(p) {
       <span class="rowitem__title">${esc(p.title)}</span>
       ${p.blocked ? '<span class="tag tag--stop">снят с продажи</span>' : ''}
       ${!p.blocked && p.blocked_qty ? `<span class="tag tag--stop">стоп: ${p.blocked_qty} шт</span>` : ''}
+      ${p.attention ? `<span class="tag tag--note" title="${esc(p.attention)}">❗</span>` : ''}
       ${p.needs_1c ? '<span class="tag tag--warn">нет в 1С</span>' : ''}
       ${p.overrides ? '<span class="tag tag--alt">пересорт</span>' : ''}
     </div>
     <span class="rowitem__price">${money(p.price)}</span>
     <span class="rowitem__total" title="Всего на складе">${p.total}</span>
     <div class="rowitem__sizes">${cells}</div>
-    <button class="icon-btn icon-btn--sm" data-edit-stock="${p.id}" title="Карточка товара">⋯</button>
+    <button class="icon-btn icon-btn--sm" data-rowmenu="${p.id}" title="Действия с товаром">⋯</button>
   </div>`;
 }
 
@@ -782,6 +790,7 @@ function renderCard(p) {
     p.unpunched ? `<span class="tag tag--danger" data-punch="${p.id}" role="button"
         title="Продажи, которые ещё не пробиты в кассе">${p.unpunched} не пробито</span>` : '',
     p.overrides ? `<span class="tag tag--alt" title="Размеры, которые пробиваются под другим наименованием 1С">Пересорт: ${p.overrides}</span>` : '',
+    p.attention ? `<span class="tag tag--note" title="${esc(p.attention)}">❗ ${esc(p.attention)}</span>` : '',
     p.blocked ? `<span class="tag tag--stop">Снят с продажи${p.block_note ? ': ' + esc(p.block_note) : ''}</span>` : '',
     !p.blocked && p.blocked_qty ? `<span class="tag tag--stop">Снято с продажи: ${p.blocked_qty} шт</span>` : '',
   ].join('');
@@ -818,6 +827,36 @@ function renderCard(p) {
       <button class="btn btn--ghost btn--sm" data-edit-stock="${p.id}">Карточка</button>
     </div>
   </article>`;
+}
+
+// В списке кнопки не помещаются, поэтому все действия карточки собраны
+// в одно меню под троеточием — вид строки от этого не тяжелеет.
+function openRowMenu(anchor, product) {
+  const items = [
+    !isSouvenir(product) && ['batch', 'Поставка партии', 'приход сразу по всем размерам'],
+    ['inventory', 'Пересчитать', 'сверить остаток с полкой'],
+    ['marks', 'Отметки размеров', 'пересорт в 1С и стоп-продажа'],
+    ['history', 'История', 'операции по этому товару'],
+    ['card', 'Карточка', 'цена, размеры, наименование в 1С'],
+  ].filter(Boolean);
+
+  $('#rowMenuTitle').innerHTML = esc(product.title)
+    + (product.attention
+        ? `<div class="pop__note"><b>❗</b> ${esc(product.attention)}</div>` : '');
+  $('#rowMenuList').innerHTML = items.map(([act, label, hint]) => `
+    <button class="pop__item" data-rowact="${act}">
+      <span class="pop__label">${esc(label)}</span>
+      <span class="pop__hint">${esc(hint)}</span>
+    </button>`).join('');
+  rowMenuProduct = product;
+  placePopover($('#rowMenu'), anchor);
+}
+
+let rowMenuProduct = null;
+
+function closeRowMenu() {
+  $('#rowMenu').hidden = true;
+  rowMenuProduct = null;
 }
 
 /* ---------- Изменение остатка ---------- */
@@ -1395,6 +1434,12 @@ function openProductForm(product, category) {
       </label>
       <p class="hint">Пока наименования нет, каждая продажа этого товара помечается как «не пробито в кассе» и попадает на вкладку «Не пробито».</p>
 
+      <label class="field">Обратить внимание
+        <input type="text" id="pAttention" placeholder="например: одну штуку продать по 2000 ₽"
+               value="${esc(product?.attention || '')}"></label>
+      <p class="hint">Если поле заполнено, на карточке товара появится значок ❗, а перед
+         списанием приложение покажет эту заметку.</p>
+
       <label class="check">
         <input type="checkbox" id="pBlocked" ${product?.blocked ? 'checked' : ''}>
         <span>Снят с продажи целиком</span>
@@ -1433,6 +1478,7 @@ function openProductForm(product, category) {
             price: $('#pPrice').value, note: $('#pNote').value,
             name_1c: $('#pNo1c').checked ? '' : $('#pName1c').value,
             link: $('#pLink').value,
+            attention: $('#pAttention').value,
             blocked: $('#pBlocked').checked,
             block_note: $('#pBlockNote').value,
             material: clothing ? $('#pMaterial').value : '',
@@ -1499,13 +1545,21 @@ const HELP_SECTIONS = [
        случайно списать товар мышью. Остаток меняют кнопки <b>−</b> и <b>+</b> под числом,
        каждая спрашивает причину и количество.</p>
     <ul>
-      <li><b>+</b> — Поставка (пришла партия) · Возврат (покупатель вернул товар)</li>
-      <li><b>−</b> — Продажа · Брак (товар испорчен) · Случайный клик (исправление)</li>
+      <li><b>+</b> — Поставка (пришла партия) · Возврат (покупатель вернул товар) ·
+          Случайный клик (лишнее списание, вернуть на склад)</li>
+      <li><b>−</b> — Продажа · Брак (товар испорчен) ·
+          Случайный клик (лишний приход, убрать со склада)</li>
     </ul>
+    <p><b>Случайный клик</b> есть в обоих меню и правит ошибку в любую сторону:
+       списали лишнее — верните плюсом, приняли лишнее — уберите минусом.</p>
     <p>Ошиблись — нажмите «Отменить» во всплывающем уведомлении или «Откатить» в журнале:
        остаток вернётся, а в журнале останется след обеих операций.</p>
     <p>На карточке одежды есть «Поставка партии» — ввод сразу по всем размерам одной
-       накладной, и «Пересчитать» для инвентаризации.</p>`],
+       накладной, и «Пересчитать» для инвентаризации.</p>
+    <p>В <b>отображении списком</b> те же действия спрятаны под кнопкой <b>⋯</b> справа
+       в строке: поставка партии, пересчёт, отметки размеров, история и карточка товара.
+       Остаток меняется нажатием на саму клетку размера — меню откроется сразу с обеими
+       половинами, «Прибавить» и «Убавить».</p>`],
 
   ['Категории и размеры', `
     <p>Товар делится на <b>одежду</b> (есть размерный ряд и материал) и
@@ -1514,7 +1568,9 @@ const HELP_SECTIONS = [
     <p>Готовые размерные ряды: российские 42–56, буквенные XXS–3XL и OS (один размер).
        Свой ряд вписывается через запятую в карточке товара.</p>
     <p>Строка «Размеры» под фильтрами показывает только выбранные размеры — можно
-       отметить сразу несколько, например 42 и 44.</p>
+       отметить сразу несколько, например 42 и 44. В списке остаются лишь те линейки,
+       где выбранный размер <b>есть в наличии</b>: пустые позиции не мешают искать товар
+       для покупателя. Сувенирную продукцию этот фильтр прячет — у неё нет размеров.</p>
     <p><b>Сортировка</b> на «Остатках»: по названию, по цвету, по цене и по остатку.
        Порядок цветов естественный — от белого и бежевого через радугу к серому и
        чёрному. На вкладке «Товары» есть своя сортировка: по названию, цене и остатку.
@@ -1537,7 +1593,11 @@ const HELP_SECTIONS = [
       <li><span class="help-dot" style="background:var(--ok)"></span>
           <b>зелёный</b> — всё остальное: продавать можно как обычно.</li>
     </ul>
-    <p>Единственный настраиваемый порог — жёлтый для сувенирки, на вкладке «Настройки».</p>`],
+    <p>Единственный настраиваемый порог — жёлтый для сувенирки, на вкладке «Настройки».</p>
+    <p>Отдельно от подсветки работает поле <b>«Обратить внимание»</b> в карточке любого
+       товара — и одежды, и сувенирки. Если оно заполнено, на «Остатках» рядом с названием
+       появляется <b>❗</b> с этим текстом, и та же заметка всплывает в меню причин перед
+       списанием. Годится для разовых оговорок: «одна кружка со сколом — отдать за 400 ₽».</p>`],
 
   ['Наименование в 1С и «Не пробито»', `
     <p>Если у товара не заполнено наименование в 1С, каждая его продажа помечается как
@@ -1568,6 +1628,10 @@ const HELP_SECTIONS = [
        Ненужную запись можно удалить в корзину; если она ещё учтена в остатках,
        приложение предложит сначала откатить операцию. Из корзины запись возвращается
        обратно, а через 60 дней удаляется сама.</p>
+    <p>Стереть журнал целиком можно в «Настройках» → «Данные», кнопкой
+       <b>«Очистить журнал»</b>. Остатки при этом не меняются — журнал их не хранит, — но
+       вместе с историей исчезает и корзина, и разбираться в расхождениях будет уже нечем.
+       Сначала скачайте бэкап; приложение переспросит дважды.</p>
     <p>Товар удаляется на вкладке «Товары» в любой момент — даже если по нему уже были
        продажи. Записи журнала при этом никуда не деваются: у них сохранён снимок
        названия, и в журнал добавляется отметка об удалении. Если товар просто закончился
@@ -1748,6 +1812,12 @@ function bind() {
     if (batch) return openBatch(Number(batch.dataset.batch), batch.dataset.inventory === '1');
     const alt = e.target.closest('[data-alt]');
     if (alt) return openMarks(Number(alt.dataset.alt));
+    const rowMenu = e.target.closest('[data-rowmenu]');
+    if (rowMenu) {
+      const p = state.data.products.find((x) => x.id === Number(rowMenu.dataset.rowmenu));
+      if (p) openRowMenu(rowMenu, p);
+      return;
+    }
     const editStock = e.target.closest('[data-edit-stock]');
     if (editStock) {
       const p = state.data.products.find((x) => x.id === Number(editStock.dataset.editStock));
@@ -1771,17 +1841,44 @@ function bind() {
     openReasonPopover(actBtn, product, tileEl.dataset.size, dir);
   });
 
+  // Меню действий строки
+  $('#rowMenuList').addEventListener('click', (e) => {
+    const item = e.target.closest('[data-rowact]');
+    if (!item || !rowMenuProduct) return;
+    const p = rowMenuProduct;
+    closeRowMenu();
+    switch (item.dataset.rowact) {
+      case 'batch': return requireShift() && openBatch(p.id, false);
+      case 'inventory': return requireShift() && openBatch(p.id, true);
+      case 'marks': return openMarks(p.id);
+      case 'card': return openProductForm(p);
+      case 'history': {
+        state.journal = { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '',
+                          category: '', from: '', to: '', trash: false, product_id: p.id };
+        ['journalSearch', 'journalKind', 'journalGroup', 'journalCategory', 'journalSeller',
+         'journalFrom', 'journalTo'].forEach((id) => { $('#' + id).value = ''; });
+        $('#journalTrash').checked = false;
+        return setTab('journal');
+      }
+      default: return undefined;
+    }
+  });
+
   // Меню причин
   $('#popList').addEventListener('click', (e) => {
     const item = e.target.closest('[data-kind]');
     if (item) applyReason(item.dataset.kind);
   });
   document.addEventListener('click', (e) => {
-    if ($('#pop').hidden) return;
-    if (e.target.closest('#pop') || e.target.closest('[data-act]')) return;
-    closePopover();
+    if (!$('#pop').hidden && !e.target.closest('#pop') && !e.target.closest('[data-act]')) {
+      closePopover();
+    }
+    if (!$('#rowMenu').hidden && !e.target.closest('#rowMenu')
+        && !e.target.closest('[data-rowmenu]')) {
+      closeRowMenu();
+    }
   });
-  window.addEventListener('resize', closePopover);
+  window.addEventListener('resize', () => { closePopover(); closeRowMenu(); });
 
   // Не пробито
   $('#punchBody').addEventListener('click', async (e) => {
@@ -2043,6 +2140,19 @@ function bind() {
       toast('Настройки сохранены');
     } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
+  $('#clearJournal').addEventListener('click', async () => {
+    const total = state.data.counters.journal;
+    if (!total) return toast('Журнал и так пуст');
+    if (!confirm(`Стереть весь журнал — ${total} ${plural(total, 'запись', 'записи', 'записей')}?\n\n`
+      + 'Вместе с ним исчезнет корзина. Остатки не изменятся, но восстановить историю '
+      + 'будет невозможно.\n\nЕсли бэкап ещё не скачан — отмените и сделайте его сначала.')) return;
+    if (!confirm('Точно очистить журнал? Это последнее предупреждение.')) return;
+    try {
+      const res = await apiPost('/api/journal/clear');
+      await reload();
+      toast(`Журнал очищен: удалено ${res.removed} ${plural(res.removed, 'запись', 'записи', 'записей')}`);
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
+  });
   $('#shutdownBtn').addEventListener('click', async () => {
     if (!confirm('Завершить работу приложения? Все данные уже сохранены.')) return;
     try { await apiPost('/api/shutdown'); } catch (_) { /* сервер закрылся, не дослав ответ */ }
@@ -2053,6 +2163,7 @@ function bind() {
   $('#modal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeModal(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (!$('#rowMenu').hidden) return closeRowMenu();
       if (!$('#pop').hidden) return closePopover();
       if (!$('#modal').hidden) return closeModal();
     }

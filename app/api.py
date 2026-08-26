@@ -28,17 +28,21 @@ KIND_LABELS = {
     db.KIND_PRODUCT_ARCHIVED: "Товар в архив",
     db.KIND_PRODUCT_RESTORED: "Товар из архива",
     db.KIND_PRODUCT_DELETED: "Товар удалён",
+    db.KIND_JOURNAL_CLEARED: "Журнал очищен",
 }
 
 # Причины прихода и расхода — из них собирается меню на кнопках + и −.
 PLUS_REASONS = [
     {"kind": db.KIND_RECEIPT, "label": "Поставка", "hint": "пришла новая партия"},
     {"kind": db.KIND_RETURN, "label": "Возврат", "hint": "покупатель вернул товар"},
+    {"kind": db.KIND_MISTAKE, "label": "Случайный клик",
+     "hint": "лишнее списание, вернуть на склад"},
 ]
 MINUS_REASONS = [
     {"kind": db.KIND_SALE, "label": "Продажа", "hint": "обычная продажа покупателю"},
     {"kind": db.KIND_DEFECT, "label": "Брак", "hint": "товар испорчен и списан"},
-    {"kind": db.KIND_MISTAKE, "label": "Случайный клик", "hint": "лишняя единица, исправление"},
+    {"kind": db.KIND_MISTAKE, "label": "Случайный клик",
+     "hint": "лишний приход, убрать со склада"},
 ]
 
 CATEGORY_LABELS = {db.CAT_CLOTHING: "Одежда", db.CAT_SOUVENIR: "Сувенирная продукция"}
@@ -82,7 +86,7 @@ LIMITS = {
     "kind": 100, "color": 60, "print_name": 100, "material": 100,
     "name_1c": 200, "link": 500, "note": 300, "block_note": 200,
     "alt_1c": 200, "alt_note": 200, "seller": 100, "product": 300,
-    "contact": 200, "wish_note": 500,
+    "contact": 200, "wish_note": 500, "attention": 200,
 }
 
 
@@ -215,6 +219,7 @@ def list_products(include_archived=False):
                 "note": p["note"],
                 "blocked": bool(p["blocked"]),
                 "block_note": p["block_note"],
+                "attention": p["attention"],
                 "archived": bool(p["archived"]),
                 "created_at": p["created_at"],
                 "title": db.product_title(p),
@@ -272,6 +277,7 @@ def save_product(payload, product_id=None, seller=""):
         _text(payload.get("note"), "note"),
         1 if payload.get("blocked") else 0,
         _text(payload.get("block_note"), "block_note"),
+        _text(payload.get("attention"), "attention"),
     )
     title = db.product_title(
         {"kind": fields[1], "color": fields[2], "print_name": fields[3]}
@@ -280,8 +286,8 @@ def save_product(payload, product_id=None, seller=""):
     if product_id is None:
         cur = db.execute(
             "INSERT INTO products(category, kind, color, print_name, material, price, sizes, "
-            "name_1c, link, note, blocked, block_note, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "name_1c, link, note, blocked, block_note, attention, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             fields + (db.now_iso(),),
         )
         product_id = cur.lastrowid
@@ -294,7 +300,7 @@ def save_product(payload, product_id=None, seller=""):
         db.execute(
             "UPDATE products SET category = ?, kind = ?, color = ?, print_name = ?, "
             "material = ?, price = ?, sizes = ?, name_1c = ?, link = ?, note = ?, "
-            "blocked = ?, block_note = ? WHERE id = ?",
+            "blocked = ?, block_note = ?, attention = ? WHERE id = ?",
             fields + (product_id,),
         )
         db.log_event(db.KIND_PRODUCT_EDITED, product_id, title, seller)
@@ -432,8 +438,11 @@ def do_move(payload):
         raise ApiError("Не выбран размер")
     if kind not in MOVE_KINDS:
         raise ApiError("Не выбрана причина операции")
-    expected_sign = 1 if kind in {r["kind"] for r in PLUS_REASONS} else -1
-    if delta == 0 or (delta > 0) != (expected_sign > 0):
+    # «Случайный клик» есть и в приходе, и в расходе — он исправляет ошибку
+    # в любую сторону, поэтому знак у него не проверяем.
+    plus_only = {r["kind"] for r in PLUS_REASONS} - {r["kind"] for r in MINUS_REASONS}
+    minus_only = {r["kind"] for r in MINUS_REASONS} - {r["kind"] for r in PLUS_REASONS}
+    if delta == 0 or (kind in plus_only and delta < 0) or (kind in minus_only and delta > 0):
         raise ApiError("Причина «%s» не совпадает с направлением операции" % KIND_LABELS[kind])
 
     try:
@@ -617,6 +626,11 @@ def purge_movement(movement_id):
     if mov is None:
         raise ApiError("Запись не найдена в корзине", 404)
     db.execute("DELETE FROM movements WHERE id = ?", (movement_id,))
+
+
+def clear_journal(payload):
+    removed = db.clear_journal(_text(payload.get("seller"), "seller"))
+    return {"removed": removed}
 
 
 def empty_trash():
@@ -994,7 +1008,7 @@ def export_stock_csv():
     _csv_row(writer, [
         "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
         "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
-        "Снято с продажи, шт",
+        "Снято с продажи, шт", "Обратить внимание",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
@@ -1005,6 +1019,7 @@ def export_stock_csv():
                 s["qty"], product["price"], s["qty"] * product["price"],
                 product["name_1c"], s["alt_1c"],
                 s["qty"] if product["blocked"] else (s["blocked_qty"] or ""),
+                product["attention"],
             ])
     return buf.getvalue()
 
@@ -1082,6 +1097,12 @@ def bootstrap():
             db_size=db.db_size(),
         ),
         "counters": {
+            # Отметки о самой очистке не считаем: иначе только что очищенный
+            # журнал выглядит непустым и кнопка предлагает стереть его снова.
+            "journal": db.query_one(
+                "SELECT COUNT(*) AS n FROM movements WHERE kind <> ?",
+                (db.KIND_JOURNAL_CLEARED,)
+            )["n"],
             "unpunched": db.query_one(
                 "SELECT COUNT(*) AS n FROM movements WHERE kind = ? AND needs_punch = 1 "
                 "AND punched = 0 AND undone = 0 AND deleted_at IS NULL", (db.KIND_SALE,)

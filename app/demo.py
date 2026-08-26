@@ -120,6 +120,12 @@ def seed():
     if hoodie:
         db.set_size_marks(hoodie["id"], "3XL", "", "", 1, "одна испачкана, ждём химчистку")
 
+    # Пример пометки «Обратить внимание» — она вешает восклицательный знак в остатках.
+    db.execute(
+        "UPDATE products SET attention = ? WHERE kind = ? AND color = ?",
+        ("одна кружка со сколом — отдать за 400 ₽", "Кружка", "белая"),
+    )
+
     for product, contact, seller, note, status, days_ago in WISHES:
         wish_id = api.save_wish(
             {

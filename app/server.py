@@ -180,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
             if match:
                 api.purge_movement(int(match.group(1)))
                 return self._json({"ok": True})
+            if route == "journal/clear":
+                return self._json(api.clear_journal(body))
             if route == "trash/empty":
                 return self._json({"removed": api.empty_trash()})
             if route == "marks":

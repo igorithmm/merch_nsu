@@ -40,10 +40,11 @@ KIND_PRODUCT_EDITED = "product_edited"
 KIND_PRODUCT_ARCHIVED = "product_archived"
 KIND_PRODUCT_RESTORED = "product_restored"
 KIND_PRODUCT_DELETED = "product_deleted"
+KIND_JOURNAL_CLEARED = "journal_cleared"
 
 EVENT_KINDS = (
     KIND_PRODUCT_ADDED, KIND_PRODUCT_EDITED, KIND_PRODUCT_ARCHIVED,
-    KIND_PRODUCT_RESTORED, KIND_PRODUCT_DELETED,
+    KIND_PRODUCT_RESTORED, KIND_PRODUCT_DELETED, KIND_JOURNAL_CLEARED,
 )
 
 KINDS = STOCK_KINDS + EVENT_KINDS
@@ -84,6 +85,7 @@ CREATE TABLE IF NOT EXISTS products (
     note       TEXT NOT NULL DEFAULT '',
     blocked    INTEGER NOT NULL DEFAULT 0,
     block_note TEXT NOT NULL DEFAULT '',
+    attention  TEXT NOT NULL DEFAULT '',
     archived   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -172,6 +174,7 @@ NEW_COLUMNS = {
         ("link", "TEXT NOT NULL DEFAULT ''"),
         ("blocked", "INTEGER NOT NULL DEFAULT 0"),
         ("block_note", "TEXT NOT NULL DEFAULT ''"),
+        ("attention", "TEXT NOT NULL DEFAULT ''"),
     ],
     "stock": [
         ("alt_1c", "TEXT NOT NULL DEFAULT ''"),
@@ -526,7 +529,24 @@ def db_size():
         return 0
 
 
-# --- Корзина ---------------------------------------------------------------
+# --- Очистка журнала и корзина ----------------------------------------------
+
+def clear_journal(seller=""):
+    """Стирает журнал целиком, включая корзину. Остатки не трогаем: это лог
+    операций, а не источник остатка. Одну запись о самой очистке оставляем."""
+    with _lock:
+        conn = connect()
+        total = conn.execute("SELECT COUNT(*) AS n FROM movements").fetchone()["n"]
+        conn.execute("DELETE FROM movements")
+        conn.execute(
+            "INSERT INTO movements(ts, product_id, title, kind, seller, note) "
+            "VALUES(?, NULL, '', ?, ?, ?)",
+            (now_iso(), KIND_JOURNAL_CLEARED, seller,
+             "Удалено записей: %d. Остатки не изменились." % total),
+        )
+        conn.commit()
+        return total
+
 
 def purge_trash(days=TRASH_DAYS):
     """Удаляет из корзины всё, что пролежало дольше срока."""

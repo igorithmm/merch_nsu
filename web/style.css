@@ -715,3 +715,24 @@ html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); 
 
 /* Названия категорий длиннее прочих фильтров — им нужно больше места. */
 #journalCategory, #catalogCategory { max-width: 232px; }
+
+/* ---------- «Обратить внимание» ---------- */
+.tag--note { background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  font-weight: 650; max-width: 320px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.rowitem .tag--note { padding: 2px 6px; }
+.pop__note { margin-top: 8px; padding: 8px 10px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 12.5px; line-height: 1.4; white-space: normal; }
+
+/* ---------- Меню действий в строке списка ---------- */
+.pop--menu { width: 246px; }
+.pop--menu .pop__title { font-weight: 650; color: var(--text);
+  padding-bottom: 9px; margin-bottom: 9px; border-bottom: 1px solid var(--border); }
+
+/* ---------- Необратимые действия в настройках ---------- */
+.danger { margin-top: 18px; padding: 12px 14px; border-radius: 11px;
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+.danger .panel__hint { margin: 0 0 10px; color: var(--danger); }
