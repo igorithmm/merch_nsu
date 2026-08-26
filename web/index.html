@@ -52,8 +52,11 @@
       </div>
       <select id="sortBy" class="select" aria-label="Сортировка">
         <option value="title">Сортировка: по названию</option>
+        <option value="color">По цвету</option>
         <option value="price_asc">Цена: сначала дешёвые</option>
         <option value="price_desc">Цена: сначала дорогие</option>
+        <option value="stock_desc">Остаток: сначала много</option>
+        <option value="stock_asc">Остаток: сначала мало</option>
       </select>
       <button class="btn btn--ghost" id="resetFilters" hidden>Сбросить</button>
     </div>
@@ -169,6 +172,13 @@
       <button class="btn btn--primary" id="addClothing">+ Новая одежда</button>
       <button class="btn btn--primary" id="addSouvenir">+ Новый сувенир</button>
       <select id="catalogCategory" class="select"></select>
+      <select id="catalogSort" class="select" aria-label="Сортировка">
+        <option value="title">Сортировка: по названию</option>
+        <option value="price_asc">Цена: сначала дешёвые</option>
+        <option value="price_desc">Цена: сначала дорогие</option>
+        <option value="stock_desc">Остаток: сначала много</option>
+        <option value="stock_asc">Остаток: сначала мало</option>
+      </select>
       <label class="switch"><input type="checkbox" id="showArchived"><span></span>Показывать архив</label>
     </div>
     <div class="table-wrap">

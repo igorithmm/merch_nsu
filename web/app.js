@@ -14,6 +14,7 @@ const state = {
   view: localStorage.getItem('merch.view') || 'grid',
   showArchived: false,
   catalogCategory: '',
+  catalogSort: localStorage.getItem('merch.catalogSort') || 'title',
 };
 
 // Цвет полоски на карточке. Ключ — основа слова без окончания, поэтому
@@ -121,11 +122,54 @@ const SWATCHES = [
 // Длинные основы проверяем первыми, иначе «син» перехватит «синий» у «тёмно-синего».
 const SWATCH_LOOKUP = [...SWATCHES].sort((a, b) => b[0].length - a[0].length);
 
-function swatchFor(color) {
+function swatchEntry(color) {
   const s = String(color || '').toLowerCase().trim();
-  if (!s) return 'var(--border-strong)';
-  const hit = SWATCH_LOOKUP.find(([stem]) => s.startsWith(stem) || s.includes(' ' + stem));
+  if (!s) return null;
+  return SWATCH_LOOKUP.find(([stem]) => s.startsWith(stem) || s.includes(' ' + stem)) || null;
+}
+
+function swatchFor(color) {
+  const hit = swatchEntry(color);
   return hit ? hit[1] : 'var(--border-strong)';
+}
+
+// «Бордовый» и «бордовая» — один цвет: сравниваем по оттенку из палитры, а если
+// слово незнакомое — по основе без падежного окончания.
+const COLOR_ENDINGS = /(ого|ому|ыми|ими|ый|ий|ой|ая|яя|ое|ее|ые|ие|ым|им|ом|ем|ую|юю)$/;
+
+function colorKey(color) {
+  const raw = String(color || '').toLowerCase().trim();
+  if (!raw) return '';
+  const hit = swatchEntry(raw);
+  if (hit) return 'hex:' + hit[1];
+  return 'txt:' + raw.split(/\s+/).map((w) => w.replace(COLOR_ENDINGS, '')).join(' ');
+}
+
+// Порядок семейств для сортировки по цвету: светлое начало, затем радуга,
+// в конце серое и чёрное.
+const COLOR_FAMILY_ORDER = [
+  'Белые и молочные', 'Бежевые и коричневые', 'Красные и бордовые',
+  'Жёлтые и оранжевые', 'Бирюза и зелень', 'Синие и голубые',
+  'Розовые и фиолетовые', 'Серые и чёрные',
+];
+
+// Оттенок → место в этом порядке. Внутри семейства сохраняем порядок палитры:
+// он выстроен от светлого к тёмному.
+const COLOR_RANK = (() => {
+  const rank = new Map();
+  SWATCHES.forEach(([, hex, label, family], i) => {
+    if (!label || rank.has(hex)) return;
+    const fam = COLOR_FAMILY_ORDER.indexOf(family);
+    rank.set(hex, [fam < 0 ? COLOR_FAMILY_ORDER.length : fam, i]);
+  });
+  return rank;
+})();
+
+function colorSortKey(color) {
+  const hit = swatchEntry(color);
+  const known = hit && COLOR_RANK.get(hit[1]);
+  // Незнакомые цвета — после известных, по алфавиту.
+  return known || [COLOR_FAMILY_ORDER.length + 1, 0];
 }
 
 const PILL = {
@@ -508,7 +552,7 @@ function visibleProducts() {
   return state.data.products.filter((p) => {
     if (f.category && p.category !== f.category) return false;
     if (f.kind && p.kind !== f.kind) return false;
-    if (f.color && p.color !== f.color) return false;
+    if (f.color && colorKey(p.color) !== f.color) return false;
     if (f.print && p.print_name !== f.print) return false;
     // Фильтр по размерам — про одежду: сувенирку он прячет.
     if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
@@ -520,13 +564,45 @@ function visibleProducts() {
       if (!needle.split(/\s+/).every((word) => hay.includes(word))) return false;
     }
     return true;
-  }).sort(sortComparator());
+  }).sort(sortComparator(state.sort));
 }
 
-function sortComparator() {
-  if (state.sort === 'price_asc') return (a, b) => a.price - b.price || a.title.localeCompare(b.title, 'ru');
-  if (state.sort === 'price_desc') return (a, b) => b.price - a.price || a.title.localeCompare(b.title, 'ru');
-  return (a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title, 'ru');
+const byTitle = (a, b) => a.title.localeCompare(b.title, 'ru');
+
+// Общая для «Остатков» и «Товаров»: строка выбора одинаковая в обоих местах.
+function sortComparator(mode) {
+  switch (mode) {
+    case 'price_asc': return (a, b) => a.price - b.price || byTitle(a, b);
+    case 'price_desc': return (a, b) => b.price - a.price || byTitle(a, b);
+    case 'stock_desc': return (a, b) => b.total - a.total || byTitle(a, b);
+    case 'stock_asc': return (a, b) => a.total - b.total || byTitle(a, b);
+    case 'color': return (a, b) => {
+      const ka = colorSortKey(a.color), kb = colorSortKey(b.color);
+      // Разные написания одного цвета — одна группа, внутри неё по названию.
+      return ka[0] - kb[0] || ka[1] - kb[1]
+        || colorKey(a.color).localeCompare(colorKey(b.color), 'ru') || byTitle(a, b);
+    };
+    default: return (a, b) => a.category.localeCompare(b.category) || byTitle(a, b);
+  }
+}
+
+// Один пункт на цвет, а не на каждое написание: «бордовый» и «бордовая» — одно.
+function colorOptions() {
+  const groups = new Map();
+  state.data.products.forEach((p) => {
+    const key = colorKey(p.color);
+    if (!key) return;
+    if (!groups.has(key)) {
+      const hit = swatchEntry(p.color);
+      groups.set(key, { label: (hit && hit[2]) || p.color, color: p.color });
+    }
+  });
+  return [...groups.entries()]
+    .sort((a, b) => {
+      const ka = colorSortKey(a[1].color), kb = colorSortKey(b[1].color);
+      return ka[0] - kb[0] || ka[1] - kb[1] || a[1].label.localeCompare(b[1].label, 'ru');
+    })
+    .map(([key, g]) => [key, g.label]);
 }
 
 function renderFilters() {
@@ -547,11 +623,11 @@ function renderFilters() {
   const sel = (name, label, values, current) => values.length
     ? `<select class="select" data-filter="${name}">
          <option value="">${label}</option>
-         ${values.map((v) => `<option value="${esc(v)}" ${current === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+         ${values.map(([value, text]) => `<option value="${esc(value)}" ${current === value ? 'selected' : ''}>${esc(text)}</option>`).join('')}
        </select>` : '';
   $('#filters').innerHTML = kinds
-    + sel('color', 'Любой цвет', facets.colors, f.color)
-    + sel('print', 'Любой принт', facets.prints, f.print)
+    + sel('color', 'Любой цвет', colorOptions(), f.color)
+    + sel('print', 'Любой принт', facets.prints.map((v) => [v, v]), f.print)
     + `<button class="chip chip--danger ${f.lowOnly ? 'is-active' : ''}" data-filter="lowOnly">Заканчивается</button>`
     + `<button class="chip chip--warn ${f.no1c ? 'is-active' : ''}" data-filter="no1c">Нет в 1С</button>`
     + `<button class="chip chip--stop ${f.blocked ? 'is-active' : ''}" data-filter="blocked">Снято с продажи</button>`;
@@ -1231,9 +1307,10 @@ async function catalogProducts() {
   const all = state.showArchived
     ? (await apiGet('/api/products', { archived: 1 })).products
     : state.data.products;
-  return state.catalogCategory
+  const list = state.catalogCategory
     ? all.filter((p) => p.category === state.catalogCategory)
     : all;
+  return [...list].sort(sortComparator(state.catalogSort));
 }
 
 async function renderCatalog() {
@@ -1437,7 +1514,13 @@ const HELP_SECTIONS = [
     <p>Готовые размерные ряды: российские 42–56, буквенные XXS–3XL и OS (один размер).
        Свой ряд вписывается через запятую в карточке товара.</p>
     <p>Строка «Размеры» под фильтрами показывает только выбранные размеры — можно
-       отметить сразу несколько, например 42 и 44.</p>`],
+       отметить сразу несколько, например 42 и 44.</p>
+    <p><b>Сортировка</b> на «Остатках»: по названию, по цвету, по цене и по остатку.
+       Порядок цветов естественный — от белого и бежевого через радугу к серому и
+       чёрному. На вкладке «Товары» есть своя сортировка: по названию, цене и остатку.
+       Выбор запоминается до следующего раза.</p>
+    <p>Разные написания одного цвета приложение считает одним: «бордовый», «бордовая»
+       и «Бордовые» дают один пункт в фильтре и стоят рядом при сортировке.</p>`],
 
   ['Подсветка остатков', `
     <p>Подсветка есть всегда — ровно одна из четырёх:</p>
@@ -1882,6 +1965,11 @@ function bind() {
     state.catalogCategory = e.target.value;
     renderCatalog();
   });
+  $('#catalogSort').addEventListener('change', (e) => {
+    state.catalogSort = e.target.value;
+    localStorage.setItem('merch.catalogSort', state.catalogSort);
+    renderCatalog();
+  });
   $('#catalogBody').addEventListener('click', async (e) => {
     const edit = e.target.closest('[data-edit]');
     if (edit) {
@@ -2000,6 +2088,7 @@ async function init() {
   $('#repTo').value = today();
   $('#wDate').value = today();
   $('#sortBy').value = state.sort;
+  $('#catalogSort').value = state.catalogSort;
   $$('#viewToggle [data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === state.view));
 
   state.seller = loadShift(state.data.run_id, state.data.shift_hours);
