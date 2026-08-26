@@ -545,17 +545,20 @@ html[data-theme="dark"] .badge--calm { color: var(--bg); }
 .rowitem__main { flex: 1 1 260px; min-width: 200px; display: flex;
   align-items: center; gap: 7px; flex-wrap: wrap; }
 .rowitem__title { font-weight: 620; }
-.rowitem__price { color: var(--text-dim); font-variant-numeric: tabular-nums;
-  white-space: nowrap; font-size: 13.5px; }
-.rowitem__total { min-width: 42px; text-align: right; font-weight: 700;
+.rowitem__price { flex: 0 0 88px; text-align: right; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 13.5px; }
+.rowitem__total { flex: 0 0 46px; text-align: right; font-weight: 700;
   font-variant-numeric: tabular-nums; }
+/* Ширина под наибольшее число размеров среди показанных строк: колонки цены и
+   остатка остаются на месте, чем бы строка ни заканчивалась. */
 .rowitem__sizes { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
-  flex: 0 1 auto; }
+  flex: 0 0 calc(var(--size-cols, 8) * 44px + (var(--size-cols, 8) - 1) * 4px);
+  max-width: 100%; }
 .icon-btn--sm { width: 30px; height: 30px; border-radius: 8px; font-size: 15px; flex: 0 0 30px; }
 
 .scell {
   display: flex; flex-direction: column; align-items: center; gap: 0;
-  min-width: 40px; padding: 3px 6px 4px; cursor: pointer;
+  width: 44px; flex: 0 0 44px; padding: 3px 4px 4px; cursor: pointer;
   border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
   line-height: 1.15;
 }
@@ -617,7 +620,7 @@ html[data-theme="dark"] .size__stop { color: var(--bg); }
 @media (max-width: 760px) {
   .markrow { grid-template-columns: 1fr; }
   .markrow > * { grid-column: 1 / -1 !important; grid-row: auto !important; }
-  .rowitem__sizes { justify-content: flex-start; width: 100%; }
+  .rowitem__sizes { justify-content: flex-start; flex: 1 1 100%; }
 }
 
 /* ---------- Категории отдельным блоком ---------- */

@@ -611,6 +611,14 @@ function renderStock() {
   }
 
   grid.className = state.view === 'list' ? 'rows' : 'grid';
+  if (state.view === 'list') {
+    // Блок размеров занимает одинаковую ширину во всех строках — иначе цена и
+    // остаток съезжают в зависимости от того, сколько у товара размеров.
+    const cols = Math.max(1, ...items.map((p) => shownSizes(p).length));
+    grid.style.setProperty('--size-cols', cols);
+  } else {
+    grid.style.removeProperty('--size-cols');
+  }
   grid.innerHTML = state.view === 'list'
     ? items.map(renderRow).join('')
     : items.map(renderCard).join('');
