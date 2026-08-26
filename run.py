@@ -164,37 +164,59 @@ def main():
     # Совместный доступ выключен — слушаем только петлю, и снаружи машины
     # приложения попросту не видно. Включён — слушаем все интерфейсы, но тогда
     # сервер спрашивает код у всех, кто пришёл не с этого же компьютера.
-    sharing = access.sharing_enabled()
-    host = args.host if args.host else ("0.0.0.0" if sharing else LOOPBACK)
+    host = args.host if args.host else server.host_for_sharing()
+    fixed_host = bool(args.host)
 
     port = find_free_port(host, args.port)
     url = "http://%s:%d/" % (LOOPBACK, port)
     httpd = server.serve(host, port)
+    announce(url, port, host)
+
+    if not args.no_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+
+    # Галочка «доступ по сети» пересоздаёт сокет на лету. Раньше для этого
+    # просили закрыть и открыть приложение, но повторный клик по ярлыку видит
+    # работающую программу и просто открывает вкладку — перезапуска не
+    # случалось, а приложение показывало адрес, на котором никто не слушает.
+    while True:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            break
+        wanted = server.take_rebind()
+        if not wanted or fixed_host:
+            break
+        server.close()
+        try:
+            httpd = server.serve(wanted, port)
+        except OSError as exc:
+            print("  ! не удалось занять адрес %s: %s — возвращаюсь на %s"
+                  % (wanted, exc, LOOPBACK))
+            httpd = server.serve(LOOPBACK, port)
+        announce(url, port, wanted)
+
+    print("Остановлено. Данные сохранены.")
+    return 0
+
+
+def announce(url, port, host):
+    from app import access
 
     print()
     print("  Мерч НГУ — учёт товара")
     print("  ----------------------")
     print("  Открыто:  %s" % url)
-    print("  База:     %s" % db.DB_PATH)
-    if sharing:
-        for addr in access.lan_addresses():
-            print("  По сети:  http://%s:%d/  — этот адрес диктуют коллеге" % (addr, port))
-        if not access.lan_addresses():
-            print("  По сети:  сеть не найдена — проверьте кабель или Wi-Fi")
-    else:
+    if host == LOOPBACK:
         print("  По сети:  выключено (включается в «Настройках»)")
+    else:
+        addresses = access.lan_addresses()
+        for addr in addresses:
+            print("  По сети:  http://%s:%d/  — этот адрес диктуют коллеге" % (addr, port))
+        if not addresses:
+            print("  По сети:  включено, но сеть не найдена — проверьте кабель или Wi-Fi")
     print("  Закрыть:  кнопка «Завершить работу» в шапке приложения")
     print()
-
-    if not args.no_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
-
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    print("Остановлено. Данные сохранены.")
-    return 0
 
 
 if __name__ == "__main__":

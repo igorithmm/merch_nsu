@@ -22,12 +22,54 @@ OPEN_ROUTES = {"ping", "session", "login", "logout"}
 
 _httpd = None
 
+# Адрес, на котором сокет слушает на самом деле, и заявка на смену адреса.
+# Настройка «доступ по сети» и реальное состояние сокета — разные вещи: пока
+# сокет не пересоздан, по сети никого нет, и показывать адрес нельзя.
+_bound_host = "127.0.0.1"
+_rebind_to = None
+
+
+def bound_host():
+    return _bound_host
+
+
+def listening_on_network():
+    """Слушаем ли мы прямо сейчас кого-то кроме самого компьютера."""
+    return _bound_host not in ("127.0.0.1", "::1", "localhost")
+
+
+def host_for_sharing():
+    """0.0.0.0 — слушать и локальную сеть; иначе только сам компьютер."""
+    return "0.0.0.0" if access.sharing_enabled() else "127.0.0.1"
+
 
 def stop_server():
     """Завершает работу по кнопке из интерфейса — из отдельного потока,
     иначе сервер заблокирует сам себя, ожидая окончания текущего запроса."""
     if _httpd is not None:
         threading.Thread(target=_httpd.shutdown, daemon=True).start()
+
+
+def rebind(host):
+    """Просит главный цикл поднять сокет на другом адресе. Раньше для этого
+    требовалось закрыть и открыть приложение, и это была ловушка: повторный
+    клик по ярлыку видит работающую программу и просто открывает вкладку,
+    ничего не перезапуская, — а приложение уже показывало сетевой адрес."""
+    global _rebind_to
+    if host == _bound_host:
+        return False
+    _rebind_to = host
+    if _httpd is not None:
+        threading.Thread(target=_httpd.shutdown, daemon=True).start()
+    return True
+
+
+def take_rebind():
+    """Забирает заявку на смену адреса: её выполняет главный цикл после того,
+    как serve_forever() вернул управление."""
+    global _rebind_to
+    host, _rebind_to = _rebind_to, None
+    return host
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -251,6 +293,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.save_share(body))
             if route == "share/code":
                 return self._json(api.reset_share_code(body))
+            if route == "share/check":
+                return self._json(api.check_share())
             if route == "journal/clear":
                 return self._json(api.clear_journal(body))
             if route == "trash/empty":
@@ -374,10 +418,19 @@ class Server(ThreadingHTTPServer):
 
 
 def serve(host="127.0.0.1", port=8765):
-    global _httpd
+    global _httpd, _bound_host
     db.connect()
     api.SHARE_PORT[0] = port
     db.purge_trash_daily()   # чистим корзину и при запуске, не только при открытии страницы
     _httpd = Server((host, port), Handler)
     _httpd.daemon_threads = True
+    _bound_host = host
     return _httpd
+
+
+def close():
+    """Освобождает порт, чтобы его тут же можно было занять другим адресом."""
+    global _httpd
+    if _httpd is not None:
+        _httpd.server_close()
+        _httpd = None

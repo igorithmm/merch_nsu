@@ -1545,6 +1545,28 @@ function renderSettings() {
 
 /* ---------- Совместный доступ по сети ---------- */
 
+async function refreshShare() {
+  try {
+    const fresh = await apiGet('/api/bootstrap');
+    state.data.share = fresh.share;
+    if (state.tab === 'settings') renderShare();
+  } catch (_) { /* не смогли — покажем при следующем открытии вкладки */ }
+}
+
+// Настоящая проверка подключением, а не догадки по настройкам.
+async function runShareCheck() {
+  const out = $('#shareCheckOut');
+  out.innerHTML = '<div class="share__note">Проверяю…</div>';
+  try {
+    const res = await apiPost('/api/share/check');
+    state.data.share = res;
+    const kind = res.check === 'ok' ? 'share__ok' : 'share__warn';
+    out.innerHTML = `<div class="${kind}">${esc(res.message)}</div>`;
+  } catch (err) {
+    out.innerHTML = `<div class="share__warn">${esc(err.message)}</div>`;
+  }
+}
+
 // Блок виден только на самом компьютере с базой: сервер отдаёт state.data.share
 // лишь запросам с этой машины, а по сети присылает null.
 function renderShare() {
@@ -1561,16 +1583,27 @@ function renderShare() {
     return;
   }
 
-  const address = share.addresses.length
-    ? share.addresses.map((a) => `<code class="share__url">http://${esc(a)}:${share.port}/</code>`).join(' ')
-    : '<span class="muted">сеть не найдена — проверьте кабель или Wi-Fi</span>';
+  // Адрес показываем, только если сокет и правда слушает сеть. Показать его
+  // раньше — значит отправить человека по ссылке, на которой его встретит
+  // «не удалось установить соединение».
+  const address = !share.listening
+    ? `<div class="share__warn">Приложение ещё не слушает сеть — адрес появится,
+         когда это произойдёт. Обычно достаточно секунды; если надпись не уходит,
+         закройте приложение кнопкой «Завершить работу» и запустите ярлык заново.</div>`
+    : share.addresses.length
+      ? share.urls.map((u) => `<div><code class="share__url">${esc(u)}</code></div>`).join('')
+      : `<div class="share__warn">Компьютер не подключён к локальной сети: сетевого
+           адреса нет. Проверьте кабель или Wi-Fi.</div>`;
 
   $('#shareBody').innerHTML = `
     <div class="share__row">
       <div class="share__label">Адрес для коллеги</div>
-      <div>${address}</div>
+      ${address}
       <p class="panel__hint">Этот адрес открывают в браузере на другом компьютере.
-         Он работает, пока это приложение запущено, а компьютер не спит.</p>
+         Он работает, пока приложение запущено, а компьютер не спит. Адресов может
+         быть несколько — подойдёт тот, что начинается так же, как адрес коллеги.</p>
+      <button class="btn btn--sm" id="shareCheck">Проверить доступ</button>
+      <div id="shareCheckOut"></div>
     </div>
     ${Object.entries(share.codes).map(([role, code]) => `
       <div class="share__row">
@@ -1731,9 +1764,18 @@ const HELP_SECTIONS = [
        и раздаёт её по локальной сети; второй компьютер ничего не устанавливает, а просто
        заходит браузером по адресу первого.</p>
     <p><b>Как включить.</b> «Настройки» → «Совместный доступ» → галочка «Открыть доступ
-       по локальной сети», затем закрыть приложение и запустить заново — адрес
-       прослушивания выбирается один раз при старте. После перезапуска в том же блоке
-       появится <b>адрес</b> вида <code>http://192.168.1.42:8765/</code> и два <b>кода</b>.</p>
+       по локальной сети». Перезапускать ничего не нужно: через секунду в том же блоке
+       появится <b>адрес</b> вида <code>http://192.168.1.42:8765/</code> и два <b>кода</b>.
+       Пока адрес не показан, приложение ещё не слушает сеть — по нему никто не ответит.
+       Адресов может быть несколько; коллеге подойдёт тот, что начинается так же, как
+       адрес его компьютера.</p>
+    <p><b>Windows спросит про брандмауэр.</b> Когда доступ включается впервые, система
+       показывает окно «Разрешить Python доступ к сети». Нажмите <b>«Разрешить доступ»</b>
+       хотя бы для частных сетей — если тогда нажали «Отмена», коллега получит
+       «не удалось установить соединение», хотя у вас всё выглядит правильно.</p>
+    <p>Кнопка <b>«Проверить доступ»</b> в том же блоке подключается к показанному адресу
+       по-настоящему и говорит, что не так: сеть не найдена, приложение ещё не слушает
+       или подключение режет брандмауэр.</p>
     <p><b>Два кода — две роли.</b> Одним кодом роли не различить, поэтому их два:</p>
     <ul>
       <li><b>Продавец</b> — полный доступ: продажи, поставки, справочник, настройки;</li>
@@ -2265,18 +2307,18 @@ function bind() {
       return;
     }
     try {
-      const res = await apiPost('/api/share', { enabled: on });
-      state.data.share = res;
+      state.data.share = await apiPost('/api/share', { enabled: on });
       renderShare();
-      toast(res.restart_needed
-        ? 'Сохранено. Чтобы изменение вступило в силу, закройте приложение и запустите заново'
-        : 'Сохранено', { kind: 'sale', timeout: 9000 });
+      toast(on ? 'Доступ по сети включён' : 'Доступ по сети выключен');
+      // Сокет поднимается в другом потоке — через мгновение состояние уже точное.
+      if (on) setTimeout(refreshShare, 900);
     } catch (err) {
       e.target.checked = !on;
       toast(esc(err.message), { kind: 'err' });
     }
   });
   $('#shareBody').addEventListener('click', async (e) => {
+    if (e.target.closest('#shareCheck')) return runShareCheck();
     const btn = e.target.closest('[data-newcode]');
     if (!btn) return;
     const role = btn.dataset.newcode;

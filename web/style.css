@@ -773,3 +773,11 @@ body.is-viewer [data-write] { display: none !important; }
   padding: 5px 11px; border-radius: 8px;
   background: var(--accent-soft); color: var(--accent); }
 .share__row .panel__hint { margin: 6px 0 0; }
+.share__warn, .share__ok, .share__note { margin: 8px 0 0; padding: 9px 12px;
+  border-radius: 9px; font-size: 12.5px; line-height: 1.45; }
+.share__warn { background: var(--warn-soft); color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); }
+.share__ok { background: var(--ok-soft); color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
+.share__note { background: var(--surface-2); color: var(--text-dim); }
+#shareCheck { margin-top: 10px; }

@@ -1154,14 +1154,26 @@ def bootstrap(role=access.ROLE_SELLER, local=True):
 def share_state(port=None):
     """Всё, что нужно показать на вкладке настроек: включён ли доступ, коды и
     адрес, который диктуют коллеге. Коды видит только тот, кто за машиной, —
-    маршрут /api/share* сервер и так пускает лишь с самого компьютера."""
+    маршрут /api/share* сервер и так пускает лишь с самого компьютера.
+
+    Отдельно от настройки отдаём «listening»: слушает ли сокет сеть прямо
+    сейчас. Показывать адрес, пока это не так, нельзя — по нему никто не
+    ответит, и человек решит, что приложение сломано."""
+    from . import server  # локально: server импортирует api, кольцо иначе не собрать
+
     port = port or SHARE_PORT[0]
-    addresses = access.lan_addresses()
+    listening = server.listening_on_network()
+    # Пока сокет не слушает сеть, адресов нет вовсе — не «есть, но не работают».
+    # Иначе снова получится ссылка, за которой ERR_CONNECTION_REFUSED.
+    addresses = access.lan_addresses() if listening else []
+    urls = ["http://%s:%d/" % (a, port) for a in addresses]
     return {
         "enabled": access.sharing_enabled(),
+        "listening": listening,
         "port": port,
         "addresses": addresses,
-        "url": "http://%s:%d/" % (addresses[0], port) if addresses else "",
+        "urls": urls,
+        "url": urls[0] if urls else "",
         "codes": {role: access.get_code(role) for role in access.ROLES},
         "role_labels": access.ROLE_LABELS,
         "role_hints": access.ROLE_HINTS,
@@ -1171,12 +1183,50 @@ def share_state(port=None):
 
 
 def save_share(payload):
-    """Включает или выключает доступ по сети. Смена вступает в силу после
-    перезапуска: слушающий адрес выбирается один раз при старте сервера."""
-    enabled = bool(payload.get("enabled"))
-    was = access.sharing_enabled()
-    access.set_sharing(enabled)
-    return dict(share_state(), restart_needed=(enabled != was))
+    """Включает или выключает доступ по сети и тут же пересоздаёт сокет на
+    нужном адресе — перезапуск приложения не нужен."""
+    from . import server
+
+    access.set_sharing(bool(payload.get("enabled")))
+    server.rebind(server.host_for_sharing())
+    return share_state()
+
+
+def check_share():
+    """Честная проверка: правда ли по показанному адресу кто-то отвечает.
+
+    Проверяем настоящим подключением к своему же сетевому адресу. Успех
+    означает, что сокет поднят и порт открыт хотя бы для этой машины; отказ
+    почти всегда упирается в брандмауэр Windows. Достучаться до нас с чужого
+    компьютера это не доказывает — там может быть своя политика сети."""
+    from . import server
+
+    state = share_state()
+    if not state["enabled"]:
+        return dict(state, check="off",
+                    message="Доступ по сети выключен — поставьте галочку выше.")
+    if not state["listening"]:
+        return dict(state, check="notlistening",
+                    message="Приложение ещё не слушает сеть. Снимите и снова поставьте "
+                            "галочку, а если не поможет — закройте приложение кнопкой "
+                            "«Завершить работу» и запустите ярлык заново.")
+    if not state["addresses"]:
+        return dict(state, check="nonet",
+                    message="Компьютер не подключён к локальной сети: нет ни одного "
+                            "сетевого адреса. Проверьте кабель или Wi-Fi.")
+
+    reachable = [a for a in state["addresses"] if access.port_open(a, state["port"])]
+    if not reachable:
+        return dict(state, check="blocked",
+                    message="Сокет поднят, но подключиться по сетевому адресу не удалось. "
+                            "Так себя ведёт брандмауэр Windows: при первом запуске он "
+                            "спрашивает про доступ, и если тогда нажали «Отмена», нужно "
+                            "разрешить Python приём входящих подключений в частных сетях.")
+    return dict(state, check="ok", reachable=reachable,
+                message="Всё в порядке: приложение отвечает по адресу %s. Если коллега "
+                        "всё равно не может открыть его, дело в сети университета — "
+                        "нужен системный администратор."
+                        % ", ".join("http://%s:%d/" % (a, state["port"]) for a in reachable))
 
 
 def reset_share_code(payload):

@@ -274,6 +274,17 @@ def lan_ip():
         return ""
 
 
+def port_open(host, port, timeout=1.5):
+    """Правда ли по этому адресу кто-то отвечает. Настоящее TCP-подключение —
+    единственный честный ответ на «а работает ли», всё остальное гадание."""
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return True
+    except OSError:
+        return False
+
+
 def lan_addresses():
     """Все адреса машины в локальной сети — первым тот, что вероятнее нужен."""
     found = []
