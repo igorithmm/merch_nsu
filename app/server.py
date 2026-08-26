@@ -6,12 +6,15 @@ import os
 import posixpath
 import re
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import access, api, db
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+# Тот же каталог с развёрнутыми ссылками — с ним сверяем границу раздачи.
+WEB_ROOT = os.path.realpath(WEB_DIR)
 
 # По этой метке ярлык запуска понимает, что приложение уже работает.
 APP_TOKEN = "merch-nsu"
@@ -19,6 +22,26 @@ APP_TOKEN = "merch-nsu"
 # Маршруты, доступные до входа: проверка живости для ярлыка, экран входа и
 # сам вход. Данных они не отдают.
 OPEN_ROUTES = {"ping", "session", "login", "logout"}
+
+# Тело запроса читаем целиком в память, поэтому размер ограничен. Вход по коду
+# открыт до всякой проверки прав — без потолка кто угодно из сети мог бы
+# прислать гигабайты и выжрать память компьютера-сервера.
+MAX_BODY_BYTES = 2 * 1024 * 1024
+
+# Приложение самодостаточно: ни одного внешнего адреса, ни одного скрипта в
+# самой странице. Политика запрещает браузеру грузить что-либо со стороны и
+# выполнять внедрённый скрипт, даже если в разметку однажды просочится чужой
+# текст. Инлайновые стили разрешены — они есть в разметке карточек.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; form-action 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
 
 _httpd = None
 
@@ -76,6 +99,11 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "MerchNSU"
     protocol_version = "HTTP/1.1"
 
+    # Соединение, которое молчит полминуты, закрываем. При HTTP/1.1 браузер
+    # держит подключение открытым, и без этого зависшие или намеренно медленные
+    # соединения копились бы, занимая по потоку каждое.
+    timeout = 30
+
     # --- ответы ------------------------------------------------------------
 
     def _send(self, status, body=b"", content_type="application/octet-stream", extra=None):
@@ -85,6 +113,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in SECURITY_HEADERS.items():
+            self.send_header(key, value)
         for key, value in (extra or {}).items():
             self.send_header(key, value)
         self.end_headers()
@@ -99,7 +129,14 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": message}, status)
 
     def _read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise api.ApiError("Не удалось разобрать запрос")
+        if length < 0:
+            raise api.ApiError("Не удалось разобрать запрос")
+        if length > MAX_BODY_BYTES:
+            raise api.ApiError("Слишком большой запрос", 413)
         if not length:
             return {}
         raw = self.rfile.read(length)
@@ -166,6 +203,11 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("share") and not access.is_local(self._client_ip()):
             return ("Совместный доступ настраивается только на компьютере "
                     "с приложением", 403)
+        # Выключение — действие за прилавком, а не по сети: иначе продавец,
+        # работающий из другого кабинета, одним нажатием оставит магазин без
+        # учёта, и включить обратно будет некому.
+        if route == "shutdown" and not access.is_local(self._client_ip()):
+            return ("Завершить работу можно только на компьютере с приложением", 403)
         return None
 
     def _dispatch(self, method):
@@ -173,6 +215,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
         params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         try:
+            if not access.allowed_host(self.headers.get("Host"), api.SHARE_PORT[0]):
+                return self._error("Обращение по чужому имени узла", 403)
             self.role = self._resolve_role()
             if path.startswith("/api/"):
                 denied = self._guard(method, path[len("/api/"):].rstrip("/"))
@@ -187,8 +231,14 @@ class Handler(BaseHTTPRequestHandler):
             self._error(exc.message, exc.status)
         except BrokenPipeError:
             pass
-        except Exception as exc:  # noqa: BLE001 — в локальном приложении показываем причину
-            self._error("Внутренняя ошибка: %s" % exc, 500)
+        except Exception as exc:  # noqa: BLE001
+            # Текст ошибки может содержать путь к базе и внутренние подробности.
+            # За своим компьютером это помощь, по сети — подсказка чужому.
+            traceback.print_exc()
+            if access.is_local(self._client_ip()):
+                self._error("Внутренняя ошибка: %s" % exc, 500)
+            else:
+                self._error("Внутренняя ошибка приложения", 500)
 
     def _handle_api(self, method, path, params):
         route = path[len("/api/"):].rstrip("/")
@@ -389,10 +439,18 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_static(self, path):
         if path in ("/", ""):
             path = "/index.html"
-        # Защита от выхода за пределы каталога web/.
+        # Раздаём только содержимое web/. Обратный слэш и NUL отвергаем сразу:
+        # posixpath.normpath их не сворачивает, зато на Windows они работают как
+        # разделители, и «/..\соседняя-папка» уводил запрос за пределы каталога.
+        if "\\" in path or "\0" in path:
+            return self._error("Файл не найден", 404)
         safe = posixpath.normpath(path).lstrip("/")
-        full = os.path.normpath(os.path.join(WEB_DIR, safe))
-        if not full.startswith(WEB_DIR) or not os.path.isfile(full):
+        full = os.path.realpath(os.path.join(WEB_DIR, safe))
+        # Сравнение с разделителем на конце: иначе «web_backup» проходит как
+        # начинающееся на «web». realpath заодно разворачивает символические ссылки.
+        if not (full == WEB_ROOT or full.startswith(WEB_ROOT + os.sep)):
+            return self._error("Файл не найден", 404)
+        if not os.path.isfile(full):
             return self._error("Файл не найден", 404)
 
         ctype, _ = mimetypes.guess_type(full)

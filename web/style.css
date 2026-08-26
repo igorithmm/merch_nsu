@@ -781,3 +781,4 @@ body.is-viewer [data-write] { display: none !important; }
   border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
 .share__note { background: var(--surface-2); color: var(--text-dim); }
 #shareCheck { margin-top: 10px; }
+body.is-remote [data-local] { display: none !important; }

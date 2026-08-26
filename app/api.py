@@ -1081,6 +1081,9 @@ def bootstrap(role=access.ROLE_SELLER, local=True):
         "role": role,
         "role_label": access.ROLE_LABELS.get(role, ""),
         "can_edit": role == access.ROLE_SELLER,
+        # За самой машиной доступно то, что не имеет смысла по сети:
+        # завершение работы и настройка совместного доступа.
+        "local": local,
         # Коды и адрес показываем лишь тому, кто сидит за компьютером с базой.
         "share": share_state() if local else None,
         "products": products,

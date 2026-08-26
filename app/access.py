@@ -147,8 +147,19 @@ def attempt_block(addr):
         return max(0, left)
 
 
+MAX_TRACKED_ADDRESSES = 1024
+
+
 def note_failure(addr):
     with _lock:
+        if addr not in _attempts and len(_attempts) >= MAX_TRACKED_ADDRESSES:
+            # Забываем самые старые записи: иначе поток запросов с подставных
+            # адресов раздувает словарь без ограничений.
+            now = time.time()
+            for key in [k for k, v in _attempts.items() if v["until"] < now][:256]:
+                _attempts.pop(key, None)
+            if len(_attempts) >= MAX_TRACKED_ADDRESSES:
+                _attempts.clear()
         state = _attempts.setdefault(addr, {"count": 0, "until": 0})
         state["count"] += 1
         if state["count"] >= MAX_ATTEMPTS:
@@ -249,6 +260,44 @@ def is_local(addr):
     return ip.is_loopback
 
 
+def allowed_host(host_header, port):
+    """Пускаем запрос только если браузер обратился по нашему собственному
+    адресу.
+
+    Без этой проверки работает подмена DNS: вредный сайт evil.example даёт
+    браузеру посетителя адрес 127.0.0.1, браузер шлёт Host и Origin со своим
+    именем — они совпадают между собой, и сверка Origin с Host пропускает
+    запрос. Тогда чужая страница получает права продавца: читает остатки,
+    меняет их и скачивает бэкап со всей базой. Поэтому имя в Host сверяем
+    с тем, как машину действительно можно называть."""
+    host = (host_header or "").strip()
+    if not host:
+        return True  # HTTP/1.0 без заголовка: браузеры так не ходят
+    # Отрезаем порт, не путаясь в IPv6 вида [::1]:8765.
+    if host.startswith("["):
+        name, _, tail = host.partition("]")
+        name = name[1:]
+        port_part = tail[1:] if tail.startswith(":") else ""
+    else:
+        name, _, port_part = host.rpartition(":")
+        if not name:
+            name, port_part = host, ""
+    if port_part and port_part != str(port):
+        return False
+
+    name = name.lower().rstrip(".")
+    if name in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return True
+    if name in {a.lower() for a in lan_addresses(cached=True)}:
+        return True
+    # Компьютер могут звать и по имени в сети — «http://SHOP-PC:8765/».
+    try:
+        own = socket.gethostname().lower()
+    except OSError:
+        return False
+    return name in (own, own.split(".", 1)[0])
+
+
 def role_for_request(addr, cookie_header_value):
     """Роль запроса: за самим компьютером — продавец, по сети — что в маркере."""
     if is_local(addr):
@@ -285,8 +334,23 @@ def port_open(host, port, timeout=1.5):
         return False
 
 
-def lan_addresses():
-    """Все адреса машины в локальной сети — первым тот, что вероятнее нужен."""
+_ADDR_TTL = 30
+_addr_cache = {"at": 0.0, "value": []}
+
+
+def lan_addresses(cached=False):
+    """Все адреса машины в локальной сети — первым тот, что вероятнее нужен.
+
+    С cached=True результат берётся из недолгого кэша: проверка заголовка Host
+    идёт на каждом запросе, а перебирать сетевые интерфейсы так часто незачем."""
+    if cached:
+        now = time.time()
+        if now - _addr_cache["at"] < _ADDR_TTL:
+            return _addr_cache["value"]
+        value = lan_addresses()
+        _addr_cache.update(at=now, value=value)
+        return value
+
     found = []
     primary = lan_ip()
     if primary:
