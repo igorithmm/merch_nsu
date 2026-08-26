@@ -54,6 +54,9 @@ REVENUE_KINDS = (KIND_SALE, KIND_RETURN)
 # Через сколько дней корзина очищается сама.
 TRASH_DAYS = 60
 
+# Потолок на одну операцию: больше похоже на промах по клавише, чем на поставку.
+MAX_OPERATION_QTY = 100000
+
 SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -289,6 +292,12 @@ def product_title(p):
     return title
 
 
+# Разумные пределы: защищают от опечатки вроде лишнего нуля и от строк,
+# которые разъезжаются по вёрстке.
+MAX_SIZE_LEN = 12
+MAX_SIZES = 40
+
+
 def parse_sizes(raw):
     """Строку «42, 44,46» превращает в упорядоченный список без дублей."""
     if isinstance(raw, (list, tuple)):
@@ -297,9 +306,11 @@ def parse_sizes(raw):
         parts = re.split(r"[,;\n]+", str(raw or ""))
     out = []
     for part in parts:
-        s = part.strip().upper()
+        s = part.strip().upper()[:MAX_SIZE_LEN]
         if s and s not in out:
             out.append(s)
+        if len(out) >= MAX_SIZES:
+            break
     return out
 
 
@@ -338,6 +349,17 @@ def set_size_marks(product_id, size, alt_1c, alt_note="", blocked_qty=0, block_n
     )
 
 
+def find_seller(name):
+    """Ищет продавца по имени без учёта регистра. Сравниваем в Python, а не в SQL:
+    lower() в SQLite работает только для латиницы, и «Игорь» с «игорь» проходили
+    как разные люди."""
+    needle = (name or "").strip().casefold()
+    for row in query("SELECT id, name, active FROM sellers"):
+        if row["name"].strip().casefold() == needle:
+            return row
+    return None
+
+
 # --- Журнал ----------------------------------------------------------------
 
 class StockError(Exception):
@@ -360,6 +382,11 @@ def apply_movement(product_id, size, delta, kind, seller="", note="", allow_nega
         raise StockError("Неизвестный тип операции: %s" % kind)
     if delta == 0:
         raise StockError("Нулевое изменение остатка")
+    if abs(delta) > MAX_OPERATION_QTY:
+        raise StockError(
+            "За одну операцию можно изменить не больше %d шт — похоже на опечатку"
+            % MAX_OPERATION_QTY
+        )
 
     with _lock:
         conn = connect()
@@ -438,6 +465,8 @@ def undo_movement(movement_id, seller=""):
             raise StockError("Запись журнала не найдена")
         if mov["undone"]:
             raise StockError("Эта операция уже отменена")
+        if mov["deleted_at"]:
+            raise StockError("Запись лежит в корзине — сначала верните её в журнал")
         if mov["delta"] == 0:
             raise StockError("Эту запись нельзя откатить — она не меняла остаток")
         if mov["product_id"] is None:

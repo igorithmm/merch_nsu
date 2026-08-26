@@ -75,6 +75,24 @@ RUN_ID = uuid.uuid4().hex
 SHIFT_HOURS = 12
 
 
+# Пределы на текстовые поля: длинная строка ломает вёрстку карточек и журнала,
+# а пользы от неё нет.
+MAX_PRICE = 10_000_000
+LIMITS = {
+    "kind": 100, "color": 60, "print_name": 100, "material": 100,
+    "name_1c": 200, "link": 500, "note": 300, "block_note": 200,
+    "alt_1c": 200, "alt_note": 200, "seller": 100, "product": 300,
+    "contact": 200, "wish_note": 500,
+}
+
+
+def _text(value, field, limit=None):
+    """Строка из запроса: обрезаем по длине и убираем управляющие символы."""
+    raw = str(value if value is not None else "")
+    raw = "".join(ch for ch in raw if ch == "\n" or ch >= " ")
+    return raw.strip()[: (limit or LIMITS.get(field, 200))]
+
+
 class ApiError(Exception):
     def __init__(self, message, status=400):
         super().__init__(message)
@@ -91,13 +109,25 @@ def _int(value, default=0):
         return default
 
 
+def _as_date(value, default):
+    """Дата из запроса. Мусор не должен ронять отчёт с ошибкой 500."""
+    try:
+        return date.fromisoformat((value or "").strip())
+    except (ValueError, TypeError):
+        return default
+
+
 def _day_bounds(params):
-    date_to = (params.get("to") or "").strip() or date.today().isoformat()
-    date_from = (params.get("from") or "").strip()
-    if not date_from:
+    today = date.today()
+    date_to = _as_date(params.get("to"), today)
+    if (params.get("from") or "").strip():
+        date_from = _as_date(params.get("from"), today)
+    else:
         days = max(1, min(_int(params.get("days"), 30), 3650))
-        date_from = (date.fromisoformat(date_to) - timedelta(days=days - 1)).isoformat()
-    return date_from, date_to
+        date_from = date_to - timedelta(days=days - 1)
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+    return date_from.isoformat(), date_to.isoformat()
 
 
 def _ts_range(date_from, date_to):
@@ -212,7 +242,7 @@ def get_product(product_id):
 
 def save_product(payload, product_id=None, seller=""):
     category = _category(payload.get("category"))
-    kind = (payload.get("kind") or "").strip()
+    kind = _text(payload.get("kind"), "kind")
     if not kind:
         raise ApiError("Укажите тип товара (например, «Толстовка» или «Кружка»)")
 
@@ -223,25 +253,25 @@ def save_product(payload, product_id=None, seller=""):
         sizes = db.parse_sizes(payload.get("sizes"))
         if not sizes:
             raise ApiError("Укажите хотя бы один размер")
-        material = (payload.get("material") or "").strip()
+        material = _text(payload.get("material"), "material")
 
-    link = (payload.get("link") or "").strip()
+    link = _text(payload.get("link"), "link")
     if link and not link.startswith(("http://", "https://")):
         link = "https://" + link
 
     fields = (
         category,
         kind,
-        (payload.get("color") or "").strip(),
-        (payload.get("print_name") or "").strip(),
+        _text(payload.get("color"), "color"),
+        _text(payload.get("print_name"), "print_name"),
         material,
-        max(0, _int(payload.get("price"), 0)),
+        min(MAX_PRICE, max(0, _int(payload.get("price"), 0))),
         ",".join(sizes),
-        (payload.get("name_1c") or "").strip(),
+        _text(payload.get("name_1c"), "name_1c"),
         link,
-        (payload.get("note") or "").strip(),
+        _text(payload.get("note"), "note"),
         1 if payload.get("blocked") else 0,
-        (payload.get("block_note") or "").strip(),
+        _text(payload.get("block_note"), "block_note"),
     )
     title = db.product_title(
         {"kind": fields[1], "color": fields[2], "print_name": fields[3]}
@@ -342,8 +372,8 @@ def save_marks(payload):
                 % (size, blocked_qty, stock.get(size, 0))
             )
         db.set_size_marks(
-            product_id, size, alt_1c, str(value.get("note") or ""),
-            blocked_qty, str(value.get("block_note") or ""),
+            product_id, size, _text(alt_1c, "alt_1c"), _text(value.get("note"), "alt_note"),
+            blocked_qty, _text(value.get("block_note"), "block_note"),
         )
         if alt_1c.strip():
             with_alt.append(size)
@@ -368,10 +398,10 @@ def list_sellers(include_inactive=False):
 
 
 def add_seller(name):
-    name = (name or "").strip()
+    name = _text(name, "seller")
     if not name:
         raise ApiError("Введите имя продавца")
-    existing = db.query_one("SELECT id FROM sellers WHERE lower(name) = lower(?)", (name,))
+    existing = db.find_seller(name)
     if existing:
         db.execute("UPDATE sellers SET active = 1 WHERE id = ?", (existing["id"],))
         return existing["id"]
@@ -409,8 +439,8 @@ def do_move(payload):
     try:
         movement_id, new_qty = db.apply_movement(
             product_id, size, delta, kind,
-            seller=(payload.get("seller") or "").strip(),
-            note=(payload.get("note") or "").strip(),
+            seller=_text(payload.get("seller"), "seller"),
+            note=_text(payload.get("note"), "note"),
         )
     except db.StockError as exc:
         raise ApiError(str(exc))
@@ -427,7 +457,7 @@ def do_receipt(payload):
     """Поставка: сразу несколько размеров одной модели."""
     product_id = _int(payload.get("product_id"), 0)
     seller = (payload.get("seller") or "").strip()
-    note = (payload.get("note") or "").strip() or "Поставка"
+    note = _text(payload.get("note"), "note") or "Поставка"
     items = payload.get("items") or {}
     if not isinstance(items, dict):
         raise ApiError("Неверный формат партии")
@@ -681,16 +711,15 @@ def list_wishes(params=None):
 
 
 def save_wish(payload, wish_id=None):
-    product = (payload.get("product") or "").strip()
+    product = _text(payload.get("product"), "product")
     if not product:
         raise ApiError("Напишите, какой товар спрашивали")
-    asked_on = (payload.get("asked_on") or "").strip() or db.today_iso()
     fields = (
-        asked_on,
+        _as_date(payload.get("asked_on"), date.today()).isoformat(),
         product,
-        (payload.get("contact") or "").strip(),
-        (payload.get("seller") or "").strip(),
-        (payload.get("note") or "").strip(),
+        _text(payload.get("contact"), "contact"),
+        _text(payload.get("seller"), "seller"),
+        _text(payload.get("note"), "wish_note"),
     )
     if wish_id is None:
         cur = db.execute(
@@ -939,17 +968,31 @@ def _natural_size_key(size):
 
 # --- Экспорт ---------------------------------------------------------------
 
+def _csv_cell(value):
+    """Excel и LibreOffice выполняют содержимое ячейки, если оно начинается с
+    =, +, - или @. Название товара «=1+1» превратилось бы в формулу, поэтому
+    такие ячейки предваряем апострофом — он в таблице не показывается."""
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
+def _csv_row(writer, values):
+    writer.writerow([_csv_cell(v) for v in values])
+
+
 def export_stock_csv():
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow([
+    _csv_row(writer, [
         "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
         "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
         "Снято с продажи, шт",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
-            writer.writerow([
+            _csv_row(writer, [
                 CATEGORY_LABELS.get(product["category"], product["category"]),
                 product["kind"], product["color"], product["print_name"],
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
@@ -964,12 +1007,12 @@ def export_movements_csv(params):
     data = list_movements(dict(params, limit=1000000))
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow([
+    _csv_row(writer, [
         "Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма",
         "Продано в 1С как", "Комментарий", "Не пробито", "Отменено",
     ])
     for row in data["items"]:
-        writer.writerow([
+        _csv_row(writer, [
             row["ts"], row["kind_label"], row["title"], row["size"],
             row["delta"] or "", row["seller"], row["amount"], row["sold_as"], row["note"],
             "да" if row["unpunched"] else "", "да" if row["undone"] else "",
@@ -980,9 +1023,9 @@ def export_movements_csv(params):
 def export_wishes_csv():
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
+    _csv_row(writer, ["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
     for w in list_wishes({"all": "1"}):
-        writer.writerow([
+        _csv_row(writer, [
             w["asked_on"], w["product"], w["contact"], w["seller"],
             w["status_label"], w["note"],
         ])

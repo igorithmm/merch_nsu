@@ -220,7 +220,7 @@ function toast(message, { kind = 'ok', undoId = null, timeout = 5000 } = {}) {
         box.remove();
         await reload();
         toast('Операция отменена');
-      } catch (err) { btn.disabled = false; toast(err.message, { kind: 'err' }); }
+      } catch (err) { btn.disabled = false; toast(esc(err.message), { kind: 'err' }); }
     };
     box.appendChild(btn);
   }
@@ -293,7 +293,7 @@ function askShift({ initial = false } = {}) {
           await apiPost('/api/sellers', { name });
           state.data = await apiGet('/api/bootstrap');
           startShift(name);
-        } catch (err) { toast(err.message, { kind: 'err' }); }
+        } catch (err) { toast(esc(err.message), { kind: 'err' }); }
       });
       const input = box.querySelector('#shiftNew');
       if (input) input.addEventListener('keydown', (e) => {
@@ -400,7 +400,7 @@ async function applyReason(kind) {
       { kind: direction > 0 ? 'ok' : 'sale', undoId: qty === 1 ? res.movement_id : null });
     if (res.needs_punch) refreshCounters();
   } catch (err) {
-    toast(err.message, { kind: 'err' });
+    toast(esc(err.message), { kind: 'err' });
   }
 }
 
@@ -837,7 +837,7 @@ function openBatch(productId, inventory = false) {
               await reload();
               toast(`Принято ${pcs(res.total)}: <b>${esc(product.title)}</b>`, { kind: 'ok' });
             }
-          } catch (err) { toast(err.message, { kind: 'err' }); }
+          } catch (err) { toast(esc(err.message), { kind: 'err' }); }
         },
       },
     ],
@@ -900,7 +900,7 @@ function openMarks(productId) {
             if (res.overrides.length) parts.push('пересорт: ' + res.overrides.join(', '));
             if (res.blocked.length) parts.push('снято с продажи: ' + res.blocked.join(', '));
             toast(parts.length ? 'Отметки сохранены — ' + parts.join('; ') : 'Отметки сняты');
-          } catch (err) { toast(err.message, { kind: 'err' }); }
+          } catch (err) { toast(esc(err.message), { kind: 'err' }); }
         },
       },
     ],
@@ -912,7 +912,7 @@ function openMarks(productId) {
 async function loadUnpunched() {
   let data;
   try { data = await apiGet('/api/unpunched'); }
-  catch (err) { return toast(err.message, { kind: 'err' }); }
+  catch (err) { return toast(esc(err.message), { kind: 'err' }); }
 
   const box = $('#punchBody');
   if (!data.total) {
@@ -993,7 +993,7 @@ async function loadJournal() {
 
   let data;
   try { data = await apiGet('/api/movements', params); }
-  catch (err) { return toast(err.message, { kind: 'err' }); }
+  catch (err) { return toast(esc(err.message), { kind: 'err' }); }
 
   const body = $('#journalBody');
   if (!data.items.length) {
@@ -1053,14 +1053,14 @@ function askTrashMode(id, message) {
         label: 'Удалить, не трогая склад',
         onClick: async (close) => {
           try { await trashMovement(id, 'keep'); close(); }
-          catch (err) { toast(err.message, { kind: 'err' }); }
+          catch (err) { toast(esc(err.message), { kind: 'err' }); }
         },
       },
       {
         label: 'Откатить и удалить', className: 'btn--primary',
         onClick: async (close) => {
           try { await trashMovement(id, 'undo'); close(); }
-          catch (err) { toast(err.message, { kind: 'err' }); }
+          catch (err) { toast(esc(err.message), { kind: 'err' }); }
         },
       },
     ],
@@ -1077,7 +1077,7 @@ async function loadWishes() {
 
   let data;
   try { data = await apiGet('/api/wishes', params); }
-  catch (err) { return toast(err.message, { kind: 'err' }); }
+  catch (err) { return toast(esc(err.message), { kind: 'err' }); }
 
   const body = $('#wishBody');
   if (!data.wishes.length) {
@@ -1113,7 +1113,7 @@ async function loadReports() {
 
   let data;
   try { data = await apiGet('/api/reports', params); }
-  catch (err) { return toast(err.message, { kind: 'err' }); }
+  catch (err) { return toast(esc(err.message), { kind: 'err' }); }
   r.data = data;
   renderReports(data);
 }
@@ -1353,7 +1353,7 @@ function openProductForm(product, category) {
             await reload();
             if (state.tab === 'catalog') await renderCatalog();
             toast(product ? 'Изменения сохранены' : 'Модель добавлена');
-          } catch (err) { toast(err.message, { kind: 'err' }); }
+          } catch (err) { toast(esc(err.message), { kind: 'err' }); }
         },
       },
     ],
@@ -1640,7 +1640,7 @@ function bind() {
         const res = await apiPost('/api/demo');
         await reload();
         toast(`Пример добавлен: ${res.added} ${plural(res.added, 'модель', 'модели', 'моделей')}`);
-      } catch (err) { seed.disabled = false; toast(err.message, { kind: 'err' }); }
+      } catch (err) { seed.disabled = false; toast(esc(err.message), { kind: 'err' }); }
       return;
     }
     const punch = e.target.closest('[data-punch]');
@@ -1694,7 +1694,7 @@ function bind() {
       else await apiPost('/api/punched', { product_id: Number(all.dataset.punchAll) });
       await reload();
       toast('Отмечено как пробитое в кассе');
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
 
   // Журнал
@@ -1738,7 +1738,7 @@ function bind() {
       const res = await apiPost('/api/trash/empty');
       await reload();
       toast(`Корзина очищена: ${res.removed} ${plural(res.removed, 'запись', 'записи', 'записей')}`);
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   $('#journalBody').addEventListener('click', async (e) => {
     if (e.target.closest('[data-undo], [data-trash]') && !requireShift()) return;
@@ -1749,14 +1749,14 @@ function bind() {
         await apiPost('/api/undo', { movement_id: Number(undo.dataset.undo) });
         await reload();
         toast('Операция откачена, остаток восстановлен');
-      } catch (err) { undo.disabled = false; toast(err.message, { kind: 'err' }); }
+      } catch (err) { undo.disabled = false; toast(esc(err.message), { kind: 'err' }); }
       return;
     }
     const trash = e.target.closest('[data-trash]');
     if (trash) {
       const id = Number(trash.dataset.trash);
       try { await trashMovement(id, ''); }
-      catch (err) { askTrashMode(id, err.message); }
+      catch (err) { askTrashMode(id, err.message); }   // текст экранируется в askTrashMode
       return;
     }
     const restore = e.target.closest('[data-restore]');
@@ -1765,7 +1765,7 @@ function bind() {
         await apiPost(`/api/movements/${restore.dataset.restore}/restore`);
         await reload();
         toast('Запись возвращена в журнал');
-      } catch (err) { toast(err.message, { kind: 'err' }); }
+      } catch (err) { toast(esc(err.message), { kind: 'err' }); }
       return;
     }
     const purge = e.target.closest('[data-purge]');
@@ -1775,7 +1775,7 @@ function bind() {
         await apiPost(`/api/movements/${purge.dataset.purge}/purge`);
         await reload();
         toast('Запись удалена навсегда');
-      } catch (err) { toast(err.message, { kind: 'err' }); }
+      } catch (err) { toast(esc(err.message), { kind: 'err' }); }
     }
   });
   $('#journalPager').addEventListener('click', (e) => {
@@ -1801,7 +1801,7 @@ function bind() {
       $('#wDate').value = today();
       await reload();
       toast('Желание записано');
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   let wTimer;
   $('#wishSearch').addEventListener('input', (e) => {
@@ -1820,7 +1820,7 @@ function bind() {
       await apiPost(`/api/wishes/${sel.dataset.wishStatus}/status`, { status: sel.value });
       await reload();
       toast('Статус обновлён');
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   $('#wishBody').addEventListener('click', async (e) => {
     const del = e.target.closest('[data-wish-delete]');
@@ -1830,7 +1830,7 @@ function bind() {
       await apiDelete(`/api/wishes/${del.dataset.wishDelete}`);
       await reload();
       toast('Заявка удалена');
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
 
   // Отчёты
@@ -1873,7 +1873,7 @@ function bind() {
         await reload();
         await renderCatalog();
         toast(archive.dataset.to === '1' ? 'Модель убрана в архив' : 'Модель возвращена в работу');
-      } catch (err) { toast(err.message, { kind: 'err' }); }
+      } catch (err) { toast(esc(err.message), { kind: 'err' }); }
       return;
     }
     const del = e.target.closest('[data-delete]');
@@ -1894,7 +1894,7 @@ function bind() {
         toast(res.movements
           ? `Товар удалён · ${res.movements} ${plural(res.movements, 'операция', 'операции', 'операций')} осталось в журнале`
           : 'Товар удалён');
-      } catch (err) { toast(err.message, { kind: 'err' }); }
+      } catch (err) { toast(esc(err.message), { kind: 'err' }); }
     }
   });
 
@@ -1909,7 +1909,7 @@ function bind() {
       await reload();
       renderSettings();
       toast(`Продавец «${esc(name)}» добавлен`);
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   $('#sellerList').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-seller]');
@@ -1918,7 +1918,7 @@ function bind() {
       await apiPost(`/api/sellers/${btn.dataset.seller}/active`, { active: btn.dataset.active === '1' });
       await reload();
       renderSettings();
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   $('#backupBtn').addEventListener('click', () => {
     toast(`Бэкап сохраняется в загрузки: <b>merch-${today()}.db</b>`, { timeout: 6000 });
@@ -1931,7 +1931,7 @@ function bind() {
       });
       await reload();
       toast('Настройки сохранены');
-    } catch (err) { toast(err.message, { kind: 'err' }); }
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
   $('#shutdownBtn').addEventListener('click', async () => {
     if (!confirm('Завершить работу приложения? Все данные уже сохранены.')) return;

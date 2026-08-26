@@ -214,9 +214,15 @@ class Handler(BaseHTTPRequestHandler):
                 api.set_seller_active(int(match.group(1)), bool(body.get("active", True)))
                 return self._json({"sellers": api.list_sellers(True)})
             if route == "settings":
-                for key in ("low_souvenir", "dead_days"):
-                    if key in body:
-                        db.set_setting(key, int(body[key]))
+                limits = {"low_souvenir": (0, 999), "dead_days": (1, 3650)}
+                for key, (low, high) in limits.items():
+                    if key not in body:
+                        continue
+                    try:
+                        value = int(str(body[key]).strip())
+                    except (TypeError, ValueError):
+                        return self._error("Значение «%s» должно быть числом" % key)
+                    db.set_setting(key, max(low, min(high, value)))
                 return self._json({"ok": True})
             return self._error("Неизвестный запрос", 404)
 
@@ -257,10 +263,19 @@ class Handler(BaseHTTPRequestHandler):
             print("  ! %s %s" % (self.command, self.path))
 
 
+class Server(ThreadingHTTPServer):
+    """Очередь входящих соединений по умолчанию всего 5: при быстрой череде
+    запросов (несколько вкладок, частые клики) лишние соединения сбрасывались
+    с ConnectionResetError."""
+
+    request_queue_size = 128
+    allow_reuse_address = True
+
+
 def serve(host="127.0.0.1", port=8765):
     global _httpd
     db.connect()
     db.purge_trash_daily()   # чистим корзину и при запуске, не только при открытии страницы
-    _httpd = ThreadingHTTPServer((host, port), Handler)
+    _httpd = Server((host, port), Handler)
     _httpd.daemon_threads = True
     return _httpd
