@@ -692,3 +692,17 @@ html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); 
   color: var(--text-dim); }
 .colorgrid__chip { width: 24px; height: 24px; border-radius: 7px; flex: 0 0 24px;
   box-shadow: inset 0 0 0 1px rgba(120, 132, 150, .45); }
+
+/* ---------- Обязательный выбор смены ---------- */
+.modal--locked .modal__head .icon-btn { display: none; }
+.modal--locked .modal__backdrop { cursor: default; }
+
+.shift { display: grid; gap: 9px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.shift__btn {
+  padding: 18px 16px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  color: var(--text); font-size: 17px; font-weight: 650; text-align: center;
+}
+.shift__btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+#sellerSelect.is-empty { border-color: var(--danger); color: var(--danger); font-weight: 650; }

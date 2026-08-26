@@ -2,6 +2,7 @@
 
 import csv
 import io
+import uuid
 from datetime import date, datetime, timedelta
 
 from . import db
@@ -63,6 +64,15 @@ WISH_STATUS_LABELS = {s["id"]: s["label"] for s in WISH_STATUSES}
 # один-два экземпляра размера это норма.
 LOW_SOUVENIR_DEFAULT = 3
 DEAD_DAYS_DEFAULT = 30
+
+
+# Метка запуска приложения. Меняется при каждом старте, поэтому браузер
+# понимает, что смена началась заново, и просит выбрать продавца.
+RUN_ID = uuid.uuid4().hex
+
+# Через сколько часов выбранная смена считается протухшей, даже если
+# приложение не закрывали (оставили включённым на ночь).
+SHIFT_HOURS = 12
 
 
 class ApiError(Exception):
@@ -986,6 +996,8 @@ def bootstrap():
     products = list_products()
     kinds = sorted({p["kind"] for p in products})
     return {
+        "run_id": RUN_ID,
+        "shift_hours": SHIFT_HOURS,
         "products": products,
         "sellers": list_sellers(include_inactive=True),
         "facets": {

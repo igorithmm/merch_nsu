@@ -3,7 +3,7 @@
 const state = {
   data: null,
   tab: 'stock',
-  seller: localStorage.getItem('merch.seller') || '',
+  seller: '',
   filters: { q: '', category: '', kind: '', color: '', print: '', sizes: [],
              lowOnly: false, no1c: false, blocked: false },
   journal: { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '', from: '', to: '',
@@ -134,6 +134,29 @@ const PILL = {
   product_restored: 'event', product_deleted: 'event',
 };
 
+// Выбранная смена живёт до перезапуска приложения и не дольше SHIFT_HOURS:
+// новый рабочий день — новый выбор, чтобы продавец не работал под чужим именем.
+const SHIFT_KEY = 'merch.shift';
+
+function loadShift(runId, shiftHours) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SHIFT_KEY) || 'null');
+    if (!saved || saved.run !== runId) return '';
+    if (Date.now() - (saved.at || 0) > shiftHours * 3600 * 1000) return '';
+    return saved.name || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function saveShift(name) {
+  try {
+    localStorage.setItem(SHIFT_KEY, JSON.stringify({
+      name, run: state.data ? state.data.run_id : '', at: Date.now(),
+    }));
+  } catch (_) { /* приватный режим браузера — просто не запомним */ }
+}
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -207,8 +230,12 @@ function toast(message, { kind = 'ok', undoId = null, timeout = 5000 } = {}) {
 
 /* ---------- Модальные окна ---------- */
 
-function openModal({ title, body, buttons = [], onOpen }) {
+let modalDismissible = true;
+
+function openModal({ title, body, buttons = [], onOpen, dismissible = true }) {
   const modal = $('#modal');
+  modalDismissible = dismissible;
+  modal.classList.toggle('modal--locked', !dismissible);
   $('#modalTitle').textContent = title;
   const bodyBox = $('#modalBody');
   bodyBox.innerHTML = '';
@@ -230,7 +257,67 @@ function openModal({ title, body, buttons = [], onOpen }) {
   const first = bodyBox.querySelector('input, select, textarea');
   if (first) setTimeout(() => first.focus(), 30);
 }
-function closeModal() { $('#modal').hidden = true; }
+function closeModal(force = false) {
+  if (!modalDismissible && !force) return;
+  modalDismissible = true;
+  $('#modal').classList.remove('modal--locked');
+  $('#modal').hidden = true;
+}
+
+/* ---------- Кто на смене ---------- */
+
+function askShift({ initial = false } = {}) {
+  const active = state.data.sellers.filter((s) => s.active);
+  const list = active.length
+    ? `<div class="shift">${active.map((x) =>
+        `<button class="shift__btn" data-shift="${esc(x.name)}">${esc(x.name)}</button>`).join('')}</div>`
+    : `<p class="hint">В списке пока никого. Впишите имя — оно сразу появится в настройках.</p>
+       <div class="row"><input type="text" id="shiftNew" placeholder="Имя продавца" autocomplete="off">
+         <button class="btn btn--primary" id="shiftAdd">Добавить и начать смену</button></div>`;
+
+  openModal({
+    title: 'Кто на смене?',
+    dismissible: !initial,
+    body: `<p class="hint">${initial
+        ? 'Приложение запущено заново — выберите себя. Все операции этой смены будут записаны на выбранное имя.'
+        : 'Выберите, кто продолжает работу. Все следующие операции будут записаны на это имя.'}</p>
+      ${list}`,
+    onOpen: (box) => {
+      box.addEventListener('click', async (e) => {
+        const pick = e.target.closest('[data-shift]');
+        if (pick) return startShift(pick.dataset.shift);
+        if (!e.target.closest('#shiftAdd')) return;
+        const name = box.querySelector('#shiftNew').value.trim();
+        if (!name) return;
+        try {
+          await apiPost('/api/sellers', { name });
+          state.data = await apiGet('/api/bootstrap');
+          startShift(name);
+        } catch (err) { toast(err.message, { kind: 'err' }); }
+      });
+      const input = box.querySelector('#shiftNew');
+      if (input) input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); box.querySelector('#shiftAdd').click(); }
+      });
+    },
+    buttons: initial ? [] : [{ label: 'Отмена', onClick: (close) => close() }],
+  });
+}
+
+// Ни одна операция не должна уйти в журнал без имени продавца.
+function requireShift() {
+  if (state.seller) return true;
+  askShift({ initial: true });
+  return false;
+}
+
+function startShift(name) {
+  state.seller = name;
+  saveShift(name);
+  renderSellerSelect();
+  closeModal(true);
+  toast(`Смена: <b>${esc(name)}</b>`);
+}
 
 /* ---------- Меню причин на кнопках − и + ---------- */
 
@@ -321,10 +408,9 @@ async function applyReason(kind) {
 
 async function reload() {
   state.data = await apiGet('/api/bootstrap');
-  if (!state.seller || !state.data.sellers.some((s) => s.name === state.seller && s.active)) {
-    const first = state.data.sellers.find((s) => s.active);
-    state.seller = first ? first.name : '';
-    localStorage.setItem('merch.seller', state.seller);
+  // Если продавца убрали из смены, пока приложение работало, — просим выбрать заново.
+  if (state.seller && !state.data.sellers.some((s) => s.name === state.seller && s.active)) {
+    state.seller = '';
   }
   renderSellerSelect();
   renderRepFilters();
@@ -358,10 +444,12 @@ function renderBadges() {
 
 function renderSellerSelect() {
   const active = state.data.sellers.filter((s) => s.active);
-  const options = (selected) => active.length
-    ? active.map((s) => `<option ${s.name === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('')
-    : '<option value="">— добавьте в настройках —</option>';
+  const options = (selected) => (active.length
+    ? (selected ? '' : '<option value="">— выберите смену —</option>')
+      + active.map((s) => `<option ${s.name === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('')
+    : '<option value="">— добавьте в настройках —</option>');
   $('#sellerSelect').innerHTML = options(state.seller);
+  $('#sellerSelect').classList.toggle('is-empty', !state.seller);
   $('#wSeller').innerHTML = options(state.seller);
   $('#journalSeller').innerHTML = '<option value="">Все продавцы</option>' +
     state.data.sellers.map((s) =>
@@ -1291,6 +1379,14 @@ function showFarewell() {
 /* ---------- Справка ---------- */
 
 const HELP_SECTIONS = [
+  ['Смена продавца', `
+    <p>При каждом запуске приложение спрашивает, <b>кто на смене</b>, и не даёт
+       работать, пока имя не выбрано — так операции не уйдут в журнал под чужим именем.</p>
+    <p>Выбор держится до перезапуска приложения, но не дольше 12 часов: если программу
+       оставили включённой на ночь, утром она снова спросит, кто работает.</p>
+    <p>Передать смену в течение дня можно списком в шапке — приложение переспросит
+       для подтверждения. Список имён редактируется в «Настройках».</p>`],
+
   ['Как менять остаток', `
     <p>Число на плитке — просто подпись, нажать на него нельзя: так не получится
        случайно списать товар мышью. Остаток меняют кнопки <b>−</b> и <b>+</b> под числом,
@@ -1445,7 +1541,7 @@ function bind() {
       return;
     }
     state.seller = next;
-    localStorage.setItem('merch.seller', state.seller);
+    saveShift(next);
     $('#wSeller').value = state.seller;
     if (next) toast(`Смена: <b>${esc(next)}</b>`);
   });
@@ -1516,6 +1612,7 @@ function bind() {
   });
 
   $('#productGrid').addEventListener('click', async (e) => {
+    if (e.target.closest('[data-act], [data-batch]') && !requireShift()) return;
     const seed = e.target.closest('#seedDemo');
     if (seed) {
       if (!confirm('Заполнить базу примером товаров и продаж? Это делается один раз, в пустую базу.')) return;
@@ -1625,6 +1722,7 @@ function bind() {
     } catch (err) { toast(err.message, { kind: 'err' }); }
   });
   $('#journalBody').addEventListener('click', async (e) => {
+    if (e.target.closest('[data-undo], [data-trash]') && !requireShift()) return;
     const undo = e.target.closest('[data-undo]');
     if (undo) {
       undo.disabled = true;
@@ -1860,14 +1958,12 @@ async function init() {
   $('#sortBy').value = state.sort;
   $$('#viewToggle [data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === state.view));
 
-  if (!state.seller) {
-    const first = state.data.sellers.find((s) => s.active);
-    state.seller = first ? first.name : '';
-  }
+  state.seller = loadShift(state.data.run_id, state.data.shift_hours);
   renderSellerSelect();
   renderRepFilters();
   renderBadges();
   setTab('stock');
+  if (!state.seller) askShift({ initial: true });
 }
 
 init();
