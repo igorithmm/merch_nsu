@@ -59,11 +59,9 @@ WISH_STATUSES = [
 ]
 WISH_STATUS_LABELS = {s["id"]: s["label"] for s in WISH_STATUSES}
 
-# Пороги подсветки. Жёлтая («мало») осталась только у сувенирки: у одежды
-# один-два экземпляра размера — норма, а не повод для тревоги.
-LOW_SOUVENIR_DEFAULT = 3        # жёлтая подсветка сувенирки
-HIGH_CLOTHING_DEFAULT = 5       # зелёная подсветка одежды
-HIGH_SOUVENIR_DEFAULT = 15      # зелёная подсветка сувенирки
+# Единственный порог остатка: жёлтая подсветка сувенирки. У одежды её нет —
+# один-два экземпляра размера это норма.
+LOW_SOUVENIR_DEFAULT = 3
 DEAD_DAYS_DEFAULT = 30
 
 
@@ -97,14 +95,10 @@ def _ts_range(date_from, date_to):
 
 
 def thresholds():
-    """Пороги подсветки остатка; жёлтый — только для сувенирной продукции."""
+    """Пороги остатка; жёлтая подсветка есть только у сувенирной продукции."""
     return {
         "low_souvenir": _int(
             db.get_setting("low_souvenir", LOW_SOUVENIR_DEFAULT), LOW_SOUVENIR_DEFAULT),
-        "high_clothing": _int(
-            db.get_setting("high_clothing", HIGH_CLOTHING_DEFAULT), HIGH_CLOTHING_DEFAULT),
-        "high_souvenir": _int(
-            db.get_setting("high_souvenir", HIGH_SOUVENIR_DEFAULT), HIGH_SOUVENIR_DEFAULT),
     }
 
 
@@ -285,19 +279,28 @@ def archive_product(product_id, archived, seller=""):
 
 
 def delete_product(product_id, seller=""):
+    """Удаляет товар. Записи журнала остаются: у них сохранён снимок названия,
+    а ссылка на товар обнуляется внешним ключом ON DELETE SET NULL."""
     product = get_product(product_id)
-    used = db.query_one(
-        "SELECT COUNT(*) AS n FROM movements WHERE product_id = ? AND delta <> 0", (product_id,)
-    )
-    if used and used["n"]:
-        raise ApiError(
-            "По товару есть %d операций в журнале — его можно только убрать в архив" % used["n"]
-        )
     title = db.product_title(product)
+    stats = db.query_one(
+        "SELECT COUNT(*) AS ops, COALESCE(SUM(CASE WHEN delta <> 0 THEN 1 ELSE 0 END), 0) AS moves "
+        "FROM movements WHERE product_id = ?", (product_id,)
+    )
+    left = db.query_one(
+        "SELECT COALESCE(SUM(qty), 0) AS qty FROM stock WHERE product_id = ?", (product_id,)
+    )["qty"]
+
     db.execute("DELETE FROM stock WHERE product_id = ?", (product_id,))
     db.execute("DELETE FROM products WHERE id = ?", (product_id,))
-    # product_id обнуляется внешним ключом, название остаётся снимком в записи.
-    db.log_event(db.KIND_PRODUCT_DELETED, None, title, seller)
+
+    parts = []
+    if left:
+        parts.append("остаток на момент удаления: %d шт" % left)
+    if stats["moves"]:
+        parts.append("операций в журнале сохранено: %d" % stats["moves"])
+    db.log_event(db.KIND_PRODUCT_DELETED, None, title, seller, "; ".join(parts))
+    return {"title": title, "movements": stats["moves"], "stock": left}
 
 
 def save_marks(payload):

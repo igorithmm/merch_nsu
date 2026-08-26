@@ -417,7 +417,7 @@ function visibleProducts() {
     if (f.sizes.length && (isSouvenir(p) || !shownSizes(p).length)) return false;
     if (f.no1c && !p.needs_1c) return false;
     if (f.blocked && !p.blocked && !p.blocked_qty) return false;
-    if (f.lowOnly && !shownSizes(p).some((s) => ['size--zero', 'size--low'].includes(stockClass(s.qty, p)))) return false;
+    if (f.lowOnly && !shownSizes(p).some((s) => ['size--zero', 'size--low'].includes(stockClass(s.qty, p, s)))) return false;
     if (needle) {
       const hay = `${p.kind} ${p.color} ${p.print_name} ${p.material} ${p.note} ${p.name_1c}`.toLowerCase();
       if (!needle.split(/\s+/).every((word) => hay.includes(word))) return false;
@@ -473,17 +473,23 @@ function renderFilters() {
     || f.sizes.length || f.lowOnly || f.no1c || f.blocked || f.q);
 }
 
-// Подсветка остатка. Ноль всегда красный. Жёлтый «мало» — только у сувенирки:
-// у одежды одна-две штуки размера это норма. Зелёный — когда товара с запасом.
-function stockClass(qty, product) {
-  const t = state.data.settings;
+// Подсветка остатка — она есть всегда, ровно одна из четырёх:
+//   красный — товара нет;
+//   жёлтый  — сувенирки осталось ниже порога (у одежды такого не бывает);
+//   синий   — при продаже нужно быть внимательным: товар снят с продажи,
+//             сняты отдельные экземпляры или у размера свой пересорт в 1С;
+//   зелёный — всё остальное, продавать можно как обычно.
+function stockClass(qty, product, row) {
   if (qty <= 0) return 'size--zero';
-  if (isSouvenir(product)) {
-    if (qty <= t.low_souvenir) return 'size--low';
-    if (qty >= t.high_souvenir) return 'size--high';
-    return '';
-  }
-  return qty >= t.high_clothing ? 'size--high' : '';
+  if (isSouvenir(product) && qty <= state.data.settings.low_souvenir) return 'size--low';
+  if (needsAttention(product, row)) return 'size--attn';
+  return 'size--ok';
+}
+
+function needsAttention(product, row) {
+  if (product.blocked) return true;
+  if (!row) return false;
+  return Boolean((row.alt_1c || '').trim()) || (row.blocked_qty || 0) > 0;
 }
 
 function renderStock() {
@@ -493,9 +499,10 @@ function renderStock() {
 
   $('#stockLegend').innerHTML = state.data.products.length ? `
     <span><b>${items.length}</b> ${plural(items.length, 'модель', 'модели', 'моделей')} на экране</span>
-    <span><span class="dot" style="background:var(--danger)"></span>0 шт — закончилось</span>
-    <span><span class="dot" style="background:var(--warn)"></span>сувенирка ≤ ${state.data.settings.low_souvenir} шт — пора заказывать</span>
-    <span><span class="dot" style="background:var(--ok)"></span>с запасом</span>
+    <span><span class="dot" style="background:var(--danger)"></span>нет товара</span>
+    <span><span class="dot" style="background:var(--warn)"></span>сувенирка ≤ ${state.data.settings.low_souvenir} шт</span>
+    <span><span class="dot" style="background:var(--accent)"></span>нужно внимание при продаже</span>
+    <span><span class="dot" style="background:var(--ok)"></span>всё в порядке</span>
     ${state.filters.sizes.length
       ? `<span><b>${state.filters.sizes.join(', ')}</b> — показаны только эти размеры</span>` : ''}
     <span class="legend__tip">Кнопки − и + под числом спросят причину операции.</span>` : '';
@@ -532,7 +539,7 @@ function renderRow(p) {
       s.alt_1c ? 'пересорт: ' + s.alt_1c : '',
       held ? `снято с продажи ${held} из ${s.qty}` : '',
     ].filter(Boolean).join(' · ');
-    return `<button class="scell ${stockClass(s.qty, p)} ${s.alt_1c ? 'scell--alt' : ''} ${stop ? 'scell--stop' : ''}"
+    return `<button class="scell ${stockClass(s.qty, p, s)} ${s.alt_1c ? 'scell--alt' : ''} ${stop ? 'scell--stop' : ''}"
         data-product="${p.id}" data-size="${esc(s.size)}" data-act="both" title="${esc(hint)}">
       ${souvenir ? '' : `<span class="scell__size">${esc(s.size)}</span>`}
       <b>${s.qty}</b>${held ? `<i class="scell__held" title="снято с продажи ${held} шт">−${held}</i>` : ''}</button>`;
@@ -564,7 +571,7 @@ function tile(product, s, showLabel) {
     held ? `Снято с продажи ${held} шт из ${s.qty}` + (s.block_note ? ': ' + s.block_note : '') : '',
   ].filter(Boolean).join('\n');
   return `
-    <div class="size ${stockClass(s.qty, product)} ${alt ? 'size--alt' : ''} ${stop ? 'size--stop' : ''}"
+    <div class="size ${stockClass(s.qty, product, s)} ${alt ? 'size--alt' : ''} ${stop ? 'size--stop' : ''}"
          data-product="${product.id}" data-size="${esc(s.size)}"
          ${hints ? `title="${esc(hints)}"` : ''}>
       ${showLabel ? `<div class="size__label">${esc(s.size)}</div>` : ''}
@@ -647,18 +654,16 @@ function applyQty(productId, size, qty, direction) {
   if (tileEl) {
     const box = tileEl.querySelector('.size__qty');
     box.childNodes[0].nodeValue = qty;
-    tileEl.classList.remove('size--zero', 'size--low', 'size--high');
-    const cls = stockClass(qty, product);
-    if (cls) tileEl.classList.add(cls);
+    tileEl.classList.remove('size--zero', 'size--low', 'size--attn', 'size--ok');
+    tileEl.classList.add(stockClass(qty, product, product && product.sizes.find((x) => x.size === size)));
     tileEl.querySelector('[data-act="minus"]').disabled = qty <= 0;
     flash(tileEl, direction);
   }
   const cell = $(`.scell${sel}`);
   if (cell) {
     cell.querySelector('b').textContent = qty;
-    cell.classList.remove('size--zero', 'size--low', 'size--high');
-    const cls = stockClass(qty, product);
-    if (cls) cell.classList.add(cls);
+    cell.classList.remove('size--zero', 'size--low', 'size--attn', 'size--ok');
+    cell.classList.add(stockClass(qty, product, product && product.sizes.find((x) => x.size === size)));
     flash(cell, direction);
   }
 
@@ -904,8 +909,8 @@ async function loadJournal() {
     body.innerHTML = data.items.map((m) => `
       <tr class="${m.undone ? 'row-undone' : ''}">
         <td class="num muted" style="white-space:nowrap">${fmtDateTime(m.ts)}</td>
-        <td><span class="pill pill--${PILL[m.kind] || 'correction'}">${esc(m.kind_label)}</span>
-            ${m.unpunched ? '<span class="tag tag--danger">не пробито</span>' : ''}</td>
+        <td class="cell-op"><span class="pill pill--${PILL[m.kind] || 'correction'}">${esc(m.kind_label)}</span>${
+          m.unpunched ? '<span class="tag tag--danger">не пробито</span>' : ''}</td>
         <td>${esc(m.title) || '<span class="muted">—</span>'}
             ${m.sold_as ? `<span class="tag tag--alt" title="Под этим наименованием продано в 1С">1С: ${esc(m.sold_as)}</span>` : ''}</td>
         <td class="ta-c num">${m.size === '—' ? '' : esc(m.size)}</td>
@@ -1149,7 +1154,7 @@ async function renderCatalog() {
       <td class="ta-r" style="white-space:nowrap">
         <button class="btn btn--sm" data-edit="${p.id}">Изменить</button>
         <button class="btn btn--sm" data-archive="${p.id}" data-to="${p.archived ? 0 : 1}">${p.archived ? 'Вернуть' : 'В архив'}</button>
-        ${p.total === 0 ? `<button class="btn btn--sm btn--danger" data-delete="${p.id}">Удалить</button>` : ''}
+        <button class="btn btn--sm btn--danger" data-delete="${p.id}">Удалить</button>
       </td>
     </tr>`).join('');
 }
@@ -1262,9 +1267,7 @@ function openProductForm(product, category) {
 /* ---------- Вкладка «Настройки» ---------- */
 
 function renderSettings() {
-  $('#highClothing').value = state.data.settings.high_clothing;
   $('#lowSouvenir').value = state.data.settings.low_souvenir;
-  $('#highSouvenir').value = state.data.settings.high_souvenir;
   $('#deadDays').value = state.data.settings.dead_days;
   $('#sellerList').innerHTML = state.data.sellers.length
     ? state.data.sellers.map((s) => `
@@ -1311,16 +1314,21 @@ const HELP_SECTIONS = [
        отметить сразу несколько, например 42 и 44.</p>`],
 
   ['Подсветка остатков', `
+    <p>Подсветка есть всегда — ровно одна из четырёх:</p>
     <ul>
       <li><span class="help-dot" style="background:var(--danger)"></span>
-          <b>красный</b> — 0 шт, закончилось;</li>
+          <b>красный</b> — товара нет совсем;</li>
       <li><span class="help-dot" style="background:var(--warn)"></span>
-          <b>жёлтый</b> — мало, <b>только у сувенирной продукции</b>: у одежды
-          одна-две штуки размера это норма, а не повод для тревоги;</li>
+          <b>жёлтый</b> — осталось ниже порога, <b>только у сувенирной продукции</b>:
+          у одежды одна-две штуки размера это норма, а не повод для тревоги;</li>
+      <li><span class="help-dot" style="background:var(--accent)"></span>
+          <b>синий</b> — при продаже нужно быть внимательным: товар снят с продажи,
+          сняты отдельные экземпляры или у размера свой пересорт в 1С. Проще говоря,
+          в «Отметках размеров» по этой позиции что-то заполнено;</li>
       <li><span class="help-dot" style="background:var(--ok)"></span>
-          <b>зелёный</b> — товара с запасом, и у одежды, и у сувенирки.</li>
+          <b>зелёный</b> — всё остальное: продавать можно как обычно.</li>
     </ul>
-    <p>Пороги настраиваются на вкладке «Настройки» — отдельно для одежды и сувенирки.</p>`],
+    <p>Единственный настраиваемый порог — жёлтый для сувенирки, на вкладке «Настройки».</p>`],
 
   ['Наименование в 1С и «Не пробито»', `
     <p>Если у товара не заполнено наименование в 1С, каждая его продажа помечается как
@@ -1338,7 +1346,8 @@ const HELP_SECTIONS = [
        Карточка станет полосатой, а пункт «Продажа» в меню будет недоступен.</p>
     <p><b>Снять с продажи отдельные экземпляры</b> — там же, в «Отметках размеров»,
        поле «снято, шт». Например, из пяти толстовок L одна испачкана: ставим 1, и
-       продать можно будет только четыре. На плитке появится метка <b>−1</b>.</p>
+       продать можно будет только четыре. На плитке появится метка <b>−1</b>, а сама
+       плитка станет синей — знак, что при продаже нужно быть внимательным.</p>
     <p>Приход, возврат, брак и коррекции работают всегда — запрет касается только продажи.</p>`],
 
   ['Желания, журнал и корзина', `
@@ -1347,7 +1356,12 @@ const HELP_SECTIONS = [
     <p><b>Журнал</b> хранит все операции и правки справочника: когда, кто, что и на какую
        сумму. Ненужную запись можно удалить в корзину; если она ещё учтена в остатках,
        приложение предложит сначала откатить операцию. Из корзины запись возвращается
-       обратно, а через 60 дней удаляется сама.</p>`],
+       обратно, а через 60 дней удаляется сама.</p>
+    <p>Товар удаляется на вкладке «Товары» в любой момент — даже если по нему уже были
+       продажи. Записи журнала при этом никуда не деваются: у них сохранён снимок
+       названия, и в журнал добавляется отметка об удалении. Если товар просто закончился
+       или снят с ассортимента, лучше убрать его в архив — он исчезнет с «Остатков», но
+       останется в отчётах.</p>`],
 
   ['Отчёты', `
     <ul>
@@ -1361,7 +1375,9 @@ const HELP_SECTIONS = [
 
   ['Данные и завершение работы', `
     <p>Вся база — один файл <code>data/merch.db</code> рядом с программой. Для бэкапа
-       скопируйте папку <code>data</code> при закрытом приложении.</p>
+       скопируйте папку <code>data</code> при закрытом приложении. Технический журнал
+       <code>data/app.log</code> чистится сам: записи старше 180 дней удаляются
+       при запуске.</p>
     <p>Кнопка <b>«Завершить работу»</b> в шапке закрывает приложение. Данные сохраняются
        сразу после каждой операции, поэтому закрывать можно в любой момент.</p>`],
 ];
@@ -1745,12 +1761,22 @@ function bind() {
     }
     const del = e.target.closest('[data-delete]');
     if (del) {
-      if (!confirm('Удалить модель насовсем? Отменить будет нельзя.')) return;
+      const list = await catalogProducts();
+      const p = list.find((x) => x.id === Number(del.dataset.delete));
+      const warn = [
+        `Удалить «${p ? p.title : 'товар'}» насовсем?`,
+        p && p.total ? `На складе ещё ${p.total} шт — остаток пропадёт.` : '',
+        'Записи журнала по этому товару останутся как история, в журнал добавится отметка об удалении.',
+        'Отменить удаление будет нельзя.',
+      ].filter(Boolean).join('\n\n');
+      if (!confirm(warn)) return;
       try {
-        await apiDelete(`/api/products/${del.dataset.delete}?seller=${encodeURIComponent(state.seller)}`);
+        const res = await apiDelete(`/api/products/${del.dataset.delete}?seller=${encodeURIComponent(state.seller)}`);
         await reload();
         await renderCatalog();
-        toast('Модель удалена');
+        toast(res.movements
+          ? `Товар удалён · ${res.movements} ${plural(res.movements, 'операция', 'операции', 'операций')} осталось в журнале`
+          : 'Товар удалён');
       } catch (err) { toast(err.message, { kind: 'err' }); }
     }
   });
@@ -1780,9 +1806,7 @@ function bind() {
   $('#saveSettings').addEventListener('click', async () => {
     try {
       await apiPost('/api/settings', {
-        high_clothing: Math.max(1, Number($('#highClothing').value) || 5),
         low_souvenir: Math.max(0, Number($('#lowSouvenir').value) || 0),
-        high_souvenir: Math.max(1, Number($('#highSouvenir').value) || 15),
         dead_days: Number($('#deadDays').value) || 30,
       });
       await reload();

@@ -195,17 +195,11 @@
       </div>
       <div class="panel">
         <h2 class="panel__title">Пороги подсветки</h2>
-        <p class="panel__hint">Ноль всегда красный. Жёлтая подсветка «мало» есть только у
-          сувенирки — у одежды одна-две штуки размера это норма. Зелёная показывает, что
-          товара с запасом.</p>
-        <label class="field">Одежда: много, шт по размеру (зелёная)
-          <input type="number" id="highClothing" min="1" max="999">
-        </label>
-        <label class="field">Сувенирка: мало, шт (жёлтая)
+        <p class="panel__hint">Красный — товара нет, синий — нужно внимание при продаже
+          (снят с продажи или пересорт), зелёный — всё в порядке. Жёлтая подсветка «мало»
+          есть только у сувенирки: у одежды одна-две штуки размера это норма.</p>
+        <label class="field">Сувенирка: мало, шт (жёлтая подсветка)
           <input type="number" id="lowSouvenir" min="0" max="999">
-        </label>
-        <label class="field">Сувенирка: много, шт (зелёная)
-          <input type="number" id="highSouvenir" min="1" max="9999">
         </label>
         <label class="field">Считать залежавшимся после, дней
           <input type="number" id="deadDays" min="1" max="999">

@@ -188,7 +188,8 @@ main { padding: 20px 18px 80px; max-width: 1500px; margin: 0 auto; }
 .card__main { flex: 1; min-width: 0; }
 .card__title { font-size: 16px; font-weight: 680; letter-spacing: -.01em; }
 .card__meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
-.tag { font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+.tag { display: inline-block; font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap; vertical-align: middle;
   background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border); }
 .card__side { text-align: right; flex: 0 0 auto; }
 .card__price { font-weight: 700; white-space: nowrap; }
@@ -259,7 +260,10 @@ main { padding: 20px 18px 80px; max-width: 1500px; margin: 0 auto; }
 .row-undone td { opacity: .5; text-decoration: line-through; }
 
 .pill { display: inline-block; padding: 2px 9px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; white-space: nowrap; }
+  font-size: 12px; font-weight: 600; white-space: nowrap; vertical-align: middle; }
+/* Операция и её пометки — одной строкой, иначе «не пробито» рвётся пополам. */
+.table td.cell-op { white-space: nowrap; }
+.table td.cell-op .tag { margin-left: 4px; }
 .pill--sale { background: var(--accent-soft); color: var(--accent); }
 .pill--receipt { background: var(--ok-soft); color: var(--ok); }
 .pill--return { background: var(--warn-soft); color: var(--warn); }
@@ -587,7 +591,7 @@ html[data-theme="dark"] .size__stop { color: var(--bg); }
 /* ---------- Диалог отметок размеров ---------- */
 .marklist { display: flex; flex-direction: column; gap: 8px; }
 .markrow { display: grid; gap: 6px 8px; align-items: center;
-  grid-template-columns: 74px 132px 1fr 178px;
+  grid-template-columns: 74px 160px 1fr 178px;
   padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .markrow:last-child { border-bottom: 0; padding-bottom: 0; }
 .markrow__size { grid-column: 1; grid-row: 1 / span 2; align-self: stretch;
@@ -603,7 +607,6 @@ html[data-theme="dark"] .size__stop { color: var(--bg); }
   border-color: color-mix(in srgb, var(--danger) 40%, transparent); color: var(--danger); }
 .markrow__stop { display: flex; align-items: center; gap: 6px; font-size: 12.5px;
   color: var(--text-dim); cursor: pointer; white-space: nowrap; }
-.markrow__stop input { width: 16px; height: 16px; accent-color: var(--danger); }
 .markrow input[type="text"] { padding: 7px 10px; border-radius: 9px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   font-size: 13.5px; width: 100%; }
@@ -630,15 +633,25 @@ html[data-theme="dark"] .size__stop { color: var(--bg); }
 .cat.is-active .cat__n { background: rgba(255, 255, 255, .25); color: var(--accent-text); }
 html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); }
 
-/* ---------- Зелёная подсветка «с запасом» ---------- */
-.size--high { border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+/* ---------- Подсветка остатка: зелёная «всё в порядке» ---------- */
+.size--ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent);
   background: var(--ok-soft); }
-.size--high .size__label { background: var(--ok); color: var(--on-danger);
+.size--ok .size__label { background: var(--ok); color: var(--on-danger);
   border-bottom-color: transparent; }
-.size--high .size__qty { color: var(--ok); }
-.scell.size--high { background: var(--ok-soft);
+.size--ok .size__qty { color: var(--ok); }
+.scell.size--ok { background: var(--ok-soft);
   border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.scell.size--high b { color: var(--ok); }
+.scell.size--ok b { color: var(--ok); }
+
+/* ---------- Синяя «нужно внимание при продаже» ---------- */
+.size--attn { border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft); }
+.size--attn .size__label { background: var(--accent); color: var(--accent-text);
+  border-bottom-color: transparent; }
+.size--attn .size__qty { color: var(--accent); }
+.scell.size--attn { background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.scell.size--attn b { color: var(--accent); }
 
 /* ---------- Снятые с продажи экземпляры ---------- */
 .scell__held { display: block; font-size: 9.5px; font-weight: 800; font-style: normal;
@@ -646,9 +659,11 @@ html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); 
 .markrow__size i { display: block; font-style: normal; font-size: 10.5px;
   font-weight: 500; color: var(--text-faint); margin-top: 2px; }
 .markrow__stop { flex-direction: row-reverse; justify-content: flex-end; }
-.markrow__stop input[type="number"] { width: 58px; padding: 6px 8px; border-radius: 8px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  text-align: center; font-weight: 650; font-size: 14px; }
+.markrow__stop input[type="number"] { width: 82px; height: 42px; padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  text-align: center; font-weight: 700; font-size: 17px; }
+.markrow__stop input[type="number"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 /* ---------- Кнопка завершения работы в шапке ---------- */
 .btn--quit { color: var(--text-dim); border-color: var(--border); background: transparent; }

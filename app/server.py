@@ -206,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
                 api.set_seller_active(int(match.group(1)), bool(body.get("active", True)))
                 return self._json({"sellers": api.list_sellers(True)})
             if route == "settings":
-                for key in ("low_souvenir", "high_clothing", "high_souvenir", "dead_days"):
+                for key in ("low_souvenir", "dead_days"):
                     if key in body:
                         db.set_setting(key, int(body[key]))
                 return self._json({"ok": True})
@@ -215,8 +215,8 @@ class Handler(BaseHTTPRequestHandler):
         if method == "DELETE":
             match = re.fullmatch(r"products/(\d+)", route)
             if match:
-                api.delete_product(int(match.group(1)), seller=params.get("seller", ""))
-                return self._json({"products": api.list_products()})
+                info = api.delete_product(int(match.group(1)), seller=params.get("seller", ""))
+                return self._json(dict(info, products=api.list_products()))
             match = re.fullmatch(r"wishes/(\d+)", route)
             if match:
                 api.delete_wish(int(match.group(1)))
