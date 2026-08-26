@@ -1354,9 +1354,17 @@ function openProductForm(product, category) {
 
 /* ---------- Вкладка «Настройки» ---------- */
 
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1 ? `${mb.toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
 function renderSettings() {
   $('#lowSouvenir').value = state.data.settings.low_souvenir;
   $('#deadDays').value = state.data.settings.dead_days;
+  const size = fmtSize(state.data.settings.db_size);
+  $('#dbSize').textContent = size ? `сейчас ${size}` : '';
   $('#sellerList').innerHTML = state.data.sellers.length
     ? state.data.sellers.map((s) => `
       <li>
@@ -1470,8 +1478,11 @@ const HELP_SECTIONS = [
     </ul>`],
 
   ['Данные и завершение работы', `
-    <p>Вся база — один файл <code>data/merch.db</code> рядом с программой. Для бэкапа
-       скопируйте папку <code>data</code> при закрытом приложении. Технический журнал
+    <p>Вся база — один файл <code>data/merch.db</code> рядом с программой. Проще всего
+       сохранить копию кнопкой <b>«Скачать бэкап»</b> в настройках: она собирает всю базу
+       в один файл, и делать это можно не закрывая приложение. Чтобы вернуться к копии,
+       положите скачанный файл в папку <code>data</code> под именем <code>merch.db</code>
+       при закрытом приложении. Технический журнал
        <code>data/app.log</code> чистится сам: записи старше 180 дней удаляются
        при запуске.</p>
     <p>Кнопка <b>«Завершить работу»</b> в шапке закрывает приложение. Данные сохраняются
@@ -1900,6 +1911,9 @@ function bind() {
       await reload();
       renderSettings();
     } catch (err) { toast(err.message, { kind: 'err' }); }
+  });
+  $('#backupBtn').addEventListener('click', () => {
+    toast(`Бэкап сохраняется в загрузки: <b>merch-${today()}.db</b>`, { timeout: 6000 });
   });
   $('#saveSettings').addEventListener('click', async () => {
     try {

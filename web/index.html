@@ -208,7 +208,15 @@
       </div>
       <div class="panel">
         <h2 class="panel__title">Данные</h2>
-        <p class="panel__hint">База лежит в файле <code>data/merch.db</code> рядом с программой. Копируйте его, чтобы сделать бэкап.</p>
+        <p class="panel__hint">Бэкап — вся база одним файлом: товары, остатки, журнал,
+          желания и настройки. Сохраните его на флешку или в облако; чтобы вернуться к
+          этой копии, положите файл в папку <code>data</code> под именем <code>merch.db</code>
+          при закрытом приложении.</p>
+        <div class="row">
+          <a class="btn btn--primary" id="backupBtn" href="/api/backup">Скачать бэкап</a>
+          <span class="muted" id="dbSize"></span>
+        </div>
+        <p class="panel__hint" style="margin:14px 0 8px">Выгрузки для Excel:</p>
         <div class="row">
           <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>

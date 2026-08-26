@@ -470,6 +470,33 @@ def undo_movement(movement_id, seller=""):
         return new_qty
 
 
+def backup_bytes():
+    """Целостный снимок базы. sqlite3.backup корректно работает и на ходу:
+    копия получается согласованной, даже если кто-то прямо сейчас продаёт."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "backup.db")
+        dest = sqlite3.connect(path)
+        try:
+            with _lock:
+                connect().backup(dest)
+        finally:
+            dest.close()
+        with open(path, "rb") as fh:
+            return fh.read()
+
+
+def db_size():
+    """Размер самой базы, байт. Служебные файлы -wal и -shm не считаем: они
+    временные и после закрытия приложения сливаются в основной файл, поэтому
+    их размер только запутал бы рядом с кнопкой бэкапа."""
+    try:
+        return os.path.getsize(DB_PATH)
+    except OSError:
+        return 0
+
+
 # --- Корзина ---------------------------------------------------------------
 
 def purge_trash(days=TRASH_DAYS):

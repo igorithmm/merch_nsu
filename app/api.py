@@ -1030,6 +1030,7 @@ def bootstrap():
             thresholds(),
             dead_days=_int(db.get_setting("dead_days", DEAD_DAYS_DEFAULT), DEAD_DAYS_DEFAULT),
             trash_days=db.TRASH_DAYS,
+            db_size=db.db_size(),
         ),
         "counters": {
             "unpunched": db.query_one(

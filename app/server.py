@@ -122,6 +122,14 @@ class Handler(BaseHTTPRequestHandler):
                     "text/csv; charset=utf-8",
                     {"Content-Disposition": 'attachment; filename="zhelaniya.csv"'},
                 )
+            if route == "backup":
+                return self._send(
+                    200,
+                    db.backup_bytes(),
+                    "application/octet-stream",
+                    {"Content-Disposition": 'attachment; filename="merch-%s.db"'
+                                            % db.today_iso()},
+                )
             if route == "export/stock.csv":
                 return self._send(
                     200,
