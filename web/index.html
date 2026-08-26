@@ -228,7 +228,9 @@
           <a class="btn btn--primary" id="backupBtn" href="/api/backup">Скачать бэкап</a>
           <span class="muted" id="dbSize"></span>
         </div>
-        <p class="panel__hint" style="margin:14px 0 8px">Выгрузки для Excel:</p>
+        <p class="panel__hint" style="margin:14px 0 8px">Выгрузки для Excel. В «Остатки»
+          попадает только то, что есть на складе: нулевые размеры пропускаются, а снятое
+          с продажи идёт наравне со всем остальным — оно ведь тоже лежит на полке.</p>
         <div class="row">
           <a class="btn btn--ghost" href="/api/export/stock.csv">Остатки в CSV</a>
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>

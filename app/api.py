@@ -1002,23 +1002,36 @@ def _csv_row(writer, values):
     writer.writerow([_csv_cell(v) for v in values])
 
 
-def export_stock_csv():
+def _csv_start():
+    """Excel выбирает разделитель по региональным настройкам Windows, а не по
+    файлу: там, где в системе стоит запятая, наши точки с запятой перестают
+    делить строку и колонки разъезжаются. Строка «sep=;» в начале файла
+    снимает вопрос — её понимают и Excel, и LibreOffice."""
     buf = io.StringIO()
-    writer = csv.writer(buf, delimiter=";")
+    buf.write("sep=;\r\n")
+    return buf, csv.writer(buf, delimiter=";")
+
+
+def export_stock_csv():
+    """Выгрузка для сверки с полкой: только то, что реально лежит на складе.
+    Снятое с продажи тоже лежит на полке, поэтому попадает в файл наравне со
+    всем остальным и никак не помечается. В шапке нет ни одной запятой —
+    иначе Excel с запятой в разделителях рвёт её не там, где строки данных."""
+    buf, writer = _csv_start()
     _csv_row(writer, [
         "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
-        "Цена", "Сумма", "Наименование в 1С", "Пересорт: продавать как",
-        "Снято с продажи, шт", "Обратить внимание",
+        "Цена", "Наименование в 1С", "Пересорт", "Обратить внимание",
     ])
     for product in list_products(include_archived=True):
         for s in product["sizes"]:
+            if s["qty"] <= 0:
+                continue
             _csv_row(writer, [
                 CATEGORY_LABELS.get(product["category"], product["category"]),
                 product["kind"], product["color"], product["print_name"],
                 "" if product["category"] == db.CAT_SOUVENIR else s["size"],
-                s["qty"], product["price"], s["qty"] * product["price"],
-                product["name_1c"], s["alt_1c"],
-                s["qty"] if product["blocked"] else (s["blocked_qty"] or ""),
+                s["qty"], product["price"],
+                product["name_1c"], "есть" if s["alt_1c"] else "",
                 product["attention"],
             ])
     return buf.getvalue()
@@ -1026,8 +1039,7 @@ def export_stock_csv():
 
 def export_movements_csv(params):
     data = list_movements(dict(params, limit=1000000))
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter=";")
+    buf, writer = _csv_start()
     _csv_row(writer, [
         "Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма",
         "Продано в 1С как", "Комментарий", "Не пробито", "Отменено",
@@ -1042,8 +1054,7 @@ def export_movements_csv(params):
 
 
 def export_wishes_csv():
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter=";")
+    buf, writer = _csv_start()
     _csv_row(writer, ["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
     for w in list_wishes({"all": "1"}):
         _csv_row(writer, [
