@@ -15,11 +15,12 @@
     <span class="topbar__name">Мерч<span class="topbar__sub">учёт товара</span></span>
   </div>
   <div class="topbar__right">
-    <label class="seller">
+    <span class="rolebadge" id="roleBadge" hidden>Только просмотр</span>
+    <label class="seller" data-write>
       <span class="seller__label">Смена</span>
       <select id="sellerSelect" aria-label="Продавец"></select>
     </label>
-    <button class="btn btn--sm btn--quit" id="shutdownBtn" title="Закрыть приложение — данные уже сохранены">Завершить работу</button>
+    <button class="btn btn--sm btn--quit" id="shutdownBtn" data-write title="Закрыть приложение — данные уже сохранены">Завершить работу</button>
     <button class="icon-btn" id="helpBtn" title="Справка по работе с приложением">?</button>
     <button class="icon-btn" id="themeBtn" title="Светлая / тёмная тема">◐</button>
   </div>
@@ -110,7 +111,7 @@
 
   <!-- ЖЕЛАНИЯ -->
   <section class="view" id="view-wishes" hidden>
-    <div class="panel">
+    <div class="panel" data-write>
       <h2 class="panel__title">Новое желание</h2>
       <p class="panel__hint">Что спрашивали, но чего не было в наличии. Пригодится при заказе партии и чтобы перезвонить клиенту.</p>
       <form id="wishForm">
@@ -169,8 +170,8 @@
   <!-- ТОВАРЫ -->
   <section class="view" id="view-catalog" hidden>
     <div class="toolbar">
-      <button class="btn btn--primary" id="addClothing">+ Новая одежда</button>
-      <button class="btn btn--primary" id="addSouvenir">+ Новый сувенир</button>
+      <button class="btn btn--primary" id="addClothing" data-write>+ Новая одежда</button>
+      <button class="btn btn--primary" id="addSouvenir" data-write>+ Новый сувенир</button>
       <select id="catalogCategory" class="select"></select>
       <select id="catalogSort" class="select" aria-label="Сортировка">
         <option value="title">Сортировка: по названию</option>
@@ -196,7 +197,7 @@
   <!-- НАСТРОЙКИ -->
   <section class="view" id="view-settings" hidden>
     <div class="cards2">
-      <div class="panel">
+      <div class="panel" data-write>
         <h2 class="panel__title">Продавцы</h2>
         <p class="panel__hint">Кто в смене — то имя и попадёт в журнал.</p>
         <ul class="sellers" id="sellerList"></ul>
@@ -205,7 +206,7 @@
           <button class="btn btn--primary" type="submit">Добавить</button>
         </form>
       </div>
-      <div class="panel">
+      <div class="panel" data-write>
         <h2 class="panel__title">Пороги подсветки</h2>
         <p class="panel__hint">Красный — товара нет, синий — нужно внимание при продаже
           (снят с продажи или пересорт), зелёный — всё в порядке. Жёлтая подсветка «мало»
@@ -224,7 +225,7 @@
           желания и настройки. Сохраните его на флешку или в облако; чтобы вернуться к
           этой копии, положите файл в папку <code>data</code> под именем <code>merch.db</code>
           при закрытом приложении.</p>
-        <div class="row">
+        <div class="row" data-write>
           <a class="btn btn--primary" id="backupBtn" href="/api/backup">Скачать бэкап</a>
           <span class="muted" id="dbSize"></span>
         </div>
@@ -236,12 +237,24 @@
           <a class="btn btn--ghost" href="/api/export/movements.csv">Журнал в CSV</a>
           <a class="btn btn--ghost" href="/api/export/wishes.csv">Желания в CSV</a>
         </div>
-        <div class="danger">
+        <div class="danger" data-write>
           <p class="panel__hint">Очистка журнала стирает всю историю операций и корзину.
             Остатки при этом не меняются, но разобраться в расхождениях будет уже нечем —
             сначала скачайте бэкап.</p>
           <button class="btn btn--danger" id="clearJournal">Очистить журнал</button>
         </div>
+      </div>
+      <div class="panel" id="sharePanel" data-write hidden>
+        <h2 class="panel__title">Совместный доступ</h2>
+        <p class="panel__hint">Позволяет открыть учёт с другого компьютера — например,
+          из кабинета начальницы. База остаётся здесь: этот компьютер раздаёт её по сети,
+          второй просто заходит браузером. Копировать файл базы в сетевую папку или
+          в облако нельзя — так её портят.</p>
+        <label class="check">
+          <input type="checkbox" id="shareToggle">
+          <span>Открыть доступ по локальной сети</span>
+        </label>
+        <div id="shareBody"></div>
       </div>
     </div>
   </section>

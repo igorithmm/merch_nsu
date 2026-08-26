@@ -5,7 +5,7 @@ import io
 import uuid
 from datetime import date, datetime, timedelta
 
-from . import db
+from . import access, db
 
 SIZE_PRESETS = [
     {"id": "ru42_56", "label": "Российские 42–56",
@@ -77,6 +77,11 @@ RUN_ID = uuid.uuid4().hex
 # Через сколько часов выбранная смена считается протухшей, даже если
 # приложение не закрывали (оставили включённым на ночь).
 SHIFT_HOURS = 12
+
+# Порт, на котором сервер поднялся на самом деле: 8765 бывает занят, и тогда
+# подбирается соседний. Значение выставляет server.serve() при старте — без
+# него нельзя показать правильный адрес для коллеги.
+SHARE_PORT = [8765]
 
 
 # Пределы на текстовые поля: длинная строка ломает вёрстку карточек и журнала,
@@ -1066,13 +1071,18 @@ def export_wishes_csv():
 
 # --- Стартовые данные ------------------------------------------------------
 
-def bootstrap():
+def bootstrap(role=access.ROLE_SELLER, local=True):
     db.purge_trash_daily()
     products = list_products()
     kinds = sorted({p["kind"] for p in products})
     return {
         "run_id": RUN_ID,
         "shift_hours": SHIFT_HOURS,
+        "role": role,
+        "role_label": access.ROLE_LABELS.get(role, ""),
+        "can_edit": role == access.ROLE_SELLER,
+        # Коды и адрес показываем лишь тому, кто сидит за компьютером с базой.
+        "share": share_state() if local else None,
         "products": products,
         "sellers": list_sellers(include_inactive=True),
         "facets": {
@@ -1137,3 +1147,46 @@ def bootstrap():
             )["n"],
         },
     }
+
+
+# --- Совместный доступ по сети ---------------------------------------------
+
+def share_state(port=None):
+    """Всё, что нужно показать на вкладке настроек: включён ли доступ, коды и
+    адрес, который диктуют коллеге. Коды видит только тот, кто за машиной, —
+    маршрут /api/share* сервер и так пускает лишь с самого компьютера."""
+    port = port or SHARE_PORT[0]
+    addresses = access.lan_addresses()
+    return {
+        "enabled": access.sharing_enabled(),
+        "port": port,
+        "addresses": addresses,
+        "url": "http://%s:%d/" % (addresses[0], port) if addresses else "",
+        "codes": {role: access.get_code(role) for role in access.ROLES},
+        "role_labels": access.ROLE_LABELS,
+        "role_hints": access.ROLE_HINTS,
+        "min_code": access.CODE_MIN_LENGTH,
+        "session_days": access.SESSION_DAYS,
+    }
+
+
+def save_share(payload):
+    """Включает или выключает доступ по сети. Смена вступает в силу после
+    перезапуска: слушающий адрес выбирается один раз при старте сервера."""
+    enabled = bool(payload.get("enabled"))
+    was = access.sharing_enabled()
+    access.set_sharing(enabled)
+    return dict(share_state(), restart_needed=(enabled != was))
+
+
+def reset_share_code(payload):
+    """Придумывает новый код для роли или ставит заданный вручную."""
+    role = payload.get("role")
+    if role not in access.ROLES:
+        raise ApiError("Неизвестная роль доступа")
+    code = _text(payload.get("code"), "seller")
+    try:
+        access.set_code(role, code or access.generate_code())
+    except ValueError as exc:
+        raise ApiError(str(exc))
+    return share_state()

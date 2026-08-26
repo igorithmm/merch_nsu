@@ -230,13 +230,21 @@ const fmtDate = (d) => (d ? fmtDateTime(d).split(' ')[0] : '—');
 const today = () => new Date().toISOString().slice(0, 10);
 const isSouvenir = (p) => p.category === 'souvenir';
 
+// Роль приходит с сервера и решает, показывать ли кнопки изменения. Настоящая
+// защита — на сервере: он всё равно отклонит запись от наблюдателя.
+const canEdit = () => state.data?.can_edit !== false;
+
 /* ---------- Работа с сервером ---------- */
 
 async function request(url, options) {
   const res = await fetch(url, options);
   let body = null;
   try { body = await res.json(); } catch (_) { /* пустой ответ */ }
-  if (!res.ok) throw new Error((body && body.error) || `Ошибка ${res.status}`);
+  if (!res.ok) {
+    const err = new Error((body && body.error) || `Ошибка ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return body;
 }
 const qs = (params) => params ? '?' + new URLSearchParams(
@@ -685,7 +693,9 @@ function renderStock() {
     <span><span class="dot" style="background:var(--ok)"></span>всё в порядке</span>
     ${state.filters.sizes.length
       ? `<span><b>${state.filters.sizes.join(', ')}</b> — показаны только эти размеры</span>` : ''}
-    <span class="legend__tip">Кнопки − и + под числом спросят причину операции.</span>` : '';
+    <span class="legend__tip">${canEdit()
+      ? 'Кнопки − и + под числом спросят причину операции.'
+      : 'Только просмотр: остатки видно, менять их можно за компьютером в магазине.'}</span>` : '';
 
   if (!state.data.products.length) {
     grid.innerHTML = `<div class="empty">
@@ -767,10 +777,10 @@ function tile(product, s, showLabel) {
       <div class="size__qty" aria-label="${where}: ${s.qty} шт">${s.qty}
         ${alt ? '<span class="size__alt">1С</span>' : ''}
         ${held ? `<span class="size__stop" title="Снято с продажи ${held} шт">−${held}</span>` : ''}</div>
-      <div class="size__ctl">
+      ${canEdit() ? `<div class="size__ctl">
         <button data-act="minus" title="Убавить: продажа, брак, случайный клик" ${s.qty <= 0 ? 'disabled' : ''}>−</button>
         <button data-act="plus" title="Прибавить: поставка, возврат">+</button>
-      </div>
+      </div>` : ''}
     </div>`;
 }
 
@@ -819,10 +829,11 @@ function renderCard(p) {
     </div>
     ${body}
     <div class="card__foot">
+      ${canEdit() ? `
       ${souvenir ? '' : `<button class="btn btn--sm" data-batch="${p.id}">Поставка партии</button>`}
       <button class="btn btn--sm" data-batch="${p.id}" data-inventory="1">Пересчитать</button>
       <button class="btn btn--sm ${p.overrides || p.blocked_qty ? 'btn--alt' : ''}" data-alt="${p.id}"
-              title="Пересорт в 1С и запрет продажи по размерам">Отметки размеров</button>
+              title="Пересорт в 1С и запрет продажи по размерам">Отметки размеров</button>` : ''}
       <button class="btn btn--ghost btn--sm" data-history="${p.id}">История</button>
       <button class="btn btn--ghost btn--sm" data-edit-stock="${p.id}">Карточка</button>
     </div>
@@ -833,9 +844,9 @@ function renderCard(p) {
 // в одно меню под троеточием — вид строки от этого не тяжелеет.
 function openRowMenu(anchor, product) {
   const items = [
-    !isSouvenir(product) && ['batch', 'Поставка партии', 'приход сразу по всем размерам'],
-    ['inventory', 'Пересчитать', 'сверить остаток с полкой'],
-    ['marks', 'Отметки размеров', 'пересорт в 1С и стоп-продажа'],
+    canEdit() && !isSouvenir(product) && ['batch', 'Поставка партии', 'приход сразу по всем размерам'],
+    canEdit() && ['inventory', 'Пересчитать', 'сверить остаток с полкой'],
+    canEdit() && ['marks', 'Отметки размеров', 'пересорт в 1С и стоп-продажа'],
     ['history', 'История', 'операции по этому товару'],
     ['card', 'Карточка', 'цена, размеры, наименование в 1С'],
   ].filter(Boolean);
@@ -1063,7 +1074,7 @@ async function loadUnpunched() {
           <div class="punch-group__count">${g.count} ${plural(g.count, 'продажа', 'продажи', 'продаж')}</div>
           <div class="muted">${money(g.amount)}</div>
         </div>
-        <button class="btn btn--primary btn--sm" data-punch-all="${g.product_id ?? ''}">Пробито всё</button>
+        ${canEdit() ? `<button class="btn btn--primary btn--sm" data-punch-all="${g.product_id ?? ''}">Пробито всё</button>` : ''}
       </div>
     </div>`).join('');
 
@@ -1074,7 +1085,8 @@ async function loadUnpunched() {
       <td class="ta-c num">${m.size === '—' ? '' : esc(m.size)}</td>
       <td class="ta-r num">${money(m.price)}</td>
       <td>${esc(m.seller) || '<span class="muted">—</span>'}</td>
-      <td class="ta-r"><button class="btn btn--sm btn--primary" data-punch-one="${m.id}">Пробито</button></td>
+      <td class="ta-r">${canEdit()
+        ? `<button class="btn btn--sm btn--primary" data-punch-one="${m.id}">Пробито</button>` : ''}</td>
     </tr>`).join('');
 
   box.innerHTML = `
@@ -1113,7 +1125,7 @@ async function loadJournal() {
   note.hidden = !j.trash;
   note.innerHTML = j.trash
     ? `Удалённые записи хранятся ${state.data.settings.trash_days} дней, потом исчезают сами.
-       <button class="btn btn--sm btn--danger" id="emptyTrash">Очистить корзину</button>` : '';
+       ${canEdit() ? '<button class="btn btn--sm btn--danger" id="emptyTrash">Очистить корзину</button>' : ''}` : '';
 
   let data;
   try { data = await apiGet('/api/movements', params); }
@@ -1139,7 +1151,7 @@ async function loadJournal() {
         <td class="ta-r num">${m.amount ? money(m.amount) : '<span class="muted">—</span>'}</td>
         <td>${esc(m.seller) || '<span class="muted">—</span>'}</td>
         <td class="muted">${esc(m.note)}</td>
-        <td class="ta-r" style="white-space:nowrap">${j.trash
+        <td class="ta-r" style="white-space:nowrap">${!canEdit() ? '' : j.trash
           ? `<button class="btn btn--sm" data-restore="${m.id}">Вернуть</button>
              <button class="btn btn--sm btn--danger" data-purge="${m.id}">Удалить насовсем</button>`
           : `${m.delta && !m.undone ? `<button class="btn btn--sm" data-undo="${m.id}">Откатить</button>` : ''}
@@ -1218,12 +1230,13 @@ async function loadWishes() {
       <td>${esc(w.contact) || '<span class="muted">—</span>'}</td>
       <td>${esc(w.seller) || '<span class="muted">—</span>'}</td>
       <td class="muted">${esc(w.note)}</td>
-      <td>
+      <td>${canEdit() ? `
         <select class="select select--sm" data-wish-status="${w.id}">
           ${statuses.map((s) => `<option value="${s.id}" ${w.status === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}
-        </select>
+        </select>` : esc(w.status_label)}
       </td>
-      <td class="ta-r"><button class="btn btn--sm btn--danger" data-wish-delete="${w.id}">Удалить</button></td>
+      <td class="ta-r">${canEdit()
+        ? `<button class="btn btn--sm btn--danger" data-wish-delete="${w.id}">Удалить</button>` : ''}</td>
     </tr>`).join('');
 }
 
@@ -1378,9 +1391,11 @@ async function renderCatalog() {
         ? esc(p.name_1c)
         : '<span class="tag tag--warn">Не заведён в 1С</span>'}</td>
       <td class="ta-r" style="white-space:nowrap">
+        ${canEdit() ? `
         <button class="btn btn--sm" data-edit="${p.id}">Изменить</button>
         <button class="btn btn--sm" data-archive="${p.id}" data-to="${p.archived ? 0 : 1}">${p.archived ? 'Вернуть' : 'В архив'}</button>
-        <button class="btn btn--sm btn--danger" data-delete="${p.id}">Удалить</button>
+        <button class="btn btn--sm btn--danger" data-delete="${p.id}">Удалить</button>`
+        : `<button class="btn btn--sm" data-edit="${p.id}">Открыть</button>`}
       </td>
     </tr>`).join('');
 }
@@ -1455,6 +1470,13 @@ function openProductForm(product, category) {
       <label class="field">Заметка
         <input type="text" id="pNote" placeholder="например, лимитированная партия" value="${esc(product?.note || '')}"></label>`,
     onOpen: (box) => {
+      if (!canEdit()) {
+        // Наблюдателю карточка нужна как справка: цена, размеры, наименование
+        // в 1С. Поля показываем, но трогать их нельзя.
+        box.querySelectorAll('input, select, textarea, [data-preset]')
+           .forEach((el) => { el.disabled = true; });
+        return;
+      }
       box.querySelectorAll('[data-preset]').forEach((btn) => {
         btn.onclick = () => { $('#pSizes').value = btn.dataset.preset.split(',').join(', '); };
       });
@@ -1467,7 +1489,7 @@ function openProductForm(product, category) {
         else name.focus();
       });
     },
-    buttons: [
+    buttons: !canEdit() ? [{ label: 'Закрыть', onClick: (close) => close() }] : [
       { label: 'Отмена', onClick: (close) => close() },
       {
         label: product ? 'Сохранить' : 'Создать', className: 'btn--primary',
@@ -1518,6 +1540,50 @@ function renderSettings() {
           ${s.active ? 'Убрать из смены' : 'Вернуть'}</button>
       </li>`).join('')
     : '<li class="muted">Пока никого. Добавьте хотя бы одного продавца.</li>';
+  renderShare();
+}
+
+/* ---------- Совместный доступ по сети ---------- */
+
+// Блок виден только на самом компьютере с базой: сервер отдаёт state.data.share
+// лишь запросам с этой машины, а по сети присылает null.
+function renderShare() {
+  const share = state.data.share;
+  const panel = $('#sharePanel');
+  panel.hidden = !share;
+  if (!share) return;
+
+  $('#shareToggle').checked = share.enabled;
+  if (!share.enabled) {
+    $('#shareBody').innerHTML = `
+      <p class="panel__hint">Пока доступ выключен, приложение видно только на этом
+         компьютере — из сети до него не достучаться.</p>`;
+    return;
+  }
+
+  const address = share.addresses.length
+    ? share.addresses.map((a) => `<code class="share__url">http://${esc(a)}:${share.port}/</code>`).join(' ')
+    : '<span class="muted">сеть не найдена — проверьте кабель или Wi-Fi</span>';
+
+  $('#shareBody').innerHTML = `
+    <div class="share__row">
+      <div class="share__label">Адрес для коллеги</div>
+      <div>${address}</div>
+      <p class="panel__hint">Этот адрес открывают в браузере на другом компьютере.
+         Он работает, пока это приложение запущено, а компьютер не спит.</p>
+    </div>
+    ${Object.entries(share.codes).map(([role, code]) => `
+      <div class="share__row">
+        <div class="share__label">${esc(share.role_labels[role] || role)}</div>
+        <div class="share__code">
+          <code>${esc(code)}</code>
+          <button class="btn btn--sm" data-newcode="${role}">Сменить</button>
+        </div>
+        <p class="panel__hint">${esc(share.role_hints[role] || '')}</p>
+      </div>`).join('')}
+    <p class="panel__hint">Код спрашивают только у тех, кто пришёл по сети: за этим
+       компьютером доступ полный и без кода. Введённый код помнится ${share.session_days}
+       дней; смена кода тут же выкидывает всех, кто входил по старому.</p>`;
 }
 
 function showFarewell() {
@@ -1658,6 +1724,35 @@ const HELP_SECTIONS = [
        при запуске.</p>
     <p>Кнопка <b>«Завершить работу»</b> в шапке закрывает приложение. Данные сохраняются
        сразу после каждой операции, поэтому закрывать можно в любой момент.</p>`],
+
+  ['Доступ с другого компьютера', `
+    <p>Учёт можно открыть из другого кабинета — например, начальнице подразделения.
+       Работает это так: компьютер в магазине остаётся <b>единственным</b>, где живёт база,
+       и раздаёт её по локальной сети; второй компьютер ничего не устанавливает, а просто
+       заходит браузером по адресу первого.</p>
+    <p><b>Как включить.</b> «Настройки» → «Совместный доступ» → галочка «Открыть доступ
+       по локальной сети», затем закрыть приложение и запустить заново — адрес
+       прослушивания выбирается один раз при старте. После перезапуска в том же блоке
+       появится <b>адрес</b> вида <code>http://192.168.1.42:8765/</code> и два <b>кода</b>.</p>
+    <p><b>Два кода — две роли.</b> Одним кодом роли не различить, поэтому их два:</p>
+    <ul>
+      <li><b>Продавец</b> — полный доступ: продажи, поставки, справочник, настройки;</li>
+      <li><b>Только просмотр</b> — остатки, журнал, отчёты и выгрузки, без права
+          что-либо менять. Этот код и дают начальнице.</li>
+    </ul>
+    <p>За самим компьютером в магазине код не спрашивают никогда — там доступ полный
+       сразу. Код помнится в браузере 14 дней. Сменили код в настройках — все, кто
+       входил по старому, тут же вылетят.</p>
+    <p><b>Компьютер не должен засыпать.</b> Спящая машина не отвечает по сети, и коллега
+       увидит «не удалось подключиться». В Windows: «Параметры» → «Система» → «Питание»,
+       поставить «Никогда» для сна при работе от сети. Выключенный компьютер, разумеется,
+       тоже недоступен — это нормально, а не поломка.</p>
+    <p><b>Чего делать нельзя.</b> Копировать <code>data/merch.db</code> в сетевую папку
+       или в облако и открывать оттуда с двух компьютеров: база так портится
+       безвозвратно. Правильный способ ровно один — тот, что описан выше.</p>
+    <p>Если коллега не может открыть адрес, дело почти всегда в брандмауэре Windows или
+       в настройках сети университета — с этим поможет системный администратор, ему нужно
+       разрешить входящие подключения на порт приложения.</p>`],
 
   ['Выгрузки в CSV', `
     <p>Три кнопки на вкладке «Настройки» и такие же на «Журнале» и «Отчётах». Файлы
@@ -1887,10 +1982,14 @@ function bind() {
     if (item) applyReason(item.dataset.kind);
   });
   document.addEventListener('click', (e) => {
-    if (!$('#pop').hidden && !e.target.closest('#pop') && !e.target.closest('[data-act]')) {
+    // Экран входа и прощание подменяют весь body, а этот обработчик висит на
+    // document и переживает подмену — поэтому проверяем, что элемент ещё есть.
+    const pop = $('#pop');
+    const menu = $('#rowMenu');
+    if (pop && !pop.hidden && !e.target.closest('#pop') && !e.target.closest('[data-act]')) {
       closePopover();
     }
-    if (!$('#rowMenu').hidden && !e.target.closest('#rowMenu')
+    if (menu && !menu.hidden && !e.target.closest('#rowMenu')
         && !e.target.closest('[data-rowmenu]')) {
       closeRowMenu();
     }
@@ -2157,6 +2256,39 @@ function bind() {
       toast('Настройки сохранены');
     } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
+  $('#shareToggle').addEventListener('change', async (e) => {
+    const on = e.target.checked;
+    if (on && !confirm('Открыть доступ к учёту по локальной сети?\n\n'
+      + 'Коллеги смогут зайти с других компьютеров по адресу этого компьютера — '
+      + 'но только по коду доступа. Коды появятся здесь же.')) {
+      e.target.checked = false;
+      return;
+    }
+    try {
+      const res = await apiPost('/api/share', { enabled: on });
+      state.data.share = res;
+      renderShare();
+      toast(res.restart_needed
+        ? 'Сохранено. Чтобы изменение вступило в силу, закройте приложение и запустите заново'
+        : 'Сохранено', { kind: 'sale', timeout: 9000 });
+    } catch (err) {
+      e.target.checked = !on;
+      toast(esc(err.message), { kind: 'err' });
+    }
+  });
+  $('#shareBody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-newcode]');
+    if (!btn) return;
+    const role = btn.dataset.newcode;
+    const label = state.data.share.role_labels[role] || role;
+    if (!confirm(`Сменить код «${label}»?\n\n`
+      + 'Все, кто заходил по старому коду, тут же вылетят и попросят новый.')) return;
+    try {
+      state.data.share = await apiPost('/api/share/code', { role });
+      renderShare();
+      toast(`Новый код: ${esc(state.data.share.codes[role])}`, { timeout: 12000 });
+    } catch (err) { toast(esc(err.message), { kind: 'err' }); }
+  });
   $('#clearJournal').addEventListener('click', async () => {
     const total = state.data.counters.journal;
     if (!total) return toast('Журнал и так пуст');
@@ -2180,15 +2312,18 @@ function bind() {
   $('#modal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeModal(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('#rowMenu').hidden) return closeRowMenu();
-      if (!$('#pop').hidden) return closePopover();
-      if (!$('#modal').hidden) return closeModal();
+      const [menu, pop, modal] = [$('#rowMenu'), $('#pop'), $('#modal')];
+      if (menu && !menu.hidden) return closeRowMenu();
+      if (pop && !pop.hidden) return closePopover();
+      if (modal && !modal.hidden) return closeModal();
     }
-    if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && state.tab === 'stock') {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT'
+        && state.tab === 'stock' && $('#search')) {
       e.preventDefault();
       $('#search').focus();
     }
-    if (e.key === 'Enter' && !$('#modal').hidden) {
+    const modalNow = $('#modal');
+    if (e.key === 'Enter' && modalNow && !modalNow.hidden) {
       const primary = $('#modalFoot .btn--primary');
       if (primary && document.activeElement.tagName !== 'TEXTAREA') primary.click();
     }
@@ -2202,13 +2337,24 @@ async function init() {
     localStorage.getItem('merch.theme') ||
     (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
-  bind();
   try {
     state.data = await apiGet('/api/bootstrap');
   } catch (err) {
+    if (err.status === 401 || err.status === 403) return showLogin(err);
     document.body.innerHTML = `<div class="empty"><div class="empty__title">Не удалось связаться с сервером</div>
       Запустите приложение ярлыком «Запустить» и обновите страницу.</div>`;
     return;
+  }
+  bind();
+
+  // Наблюдателю кнопки изменения просто не показываем — запись ему всё равно
+  // запретит сервер, но пустые кнопки, которые ругаются, только злят.
+  document.body.classList.toggle('is-viewer', !canEdit());
+  if (!canEdit()) {
+    const badge = $('#roleBadge');
+    badge.hidden = false;
+    badge.textContent = state.data.role_label || 'Только просмотр';
+    badge.title = 'Вы вошли по коду наблюдателя: данные видно, менять нельзя';
   }
 
   $('#journalKind').innerHTML = '<option value="">Все операции</option>' +
@@ -2219,12 +2365,51 @@ async function init() {
   $('#catalogSort').value = state.catalogSort;
   $$('#viewToggle [data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === state.view));
 
-  state.seller = loadShift(state.data.run_id, state.data.shift_hours);
+  state.seller = canEdit() ? loadShift(state.data.run_id, state.data.shift_hours) : '';
   renderSellerSelect();
   renderRepFilters();
   renderBadges();
   setTab('stock');
-  if (!state.seller) askShift({ initial: true });
+  // Наблюдатель ничего не пишет в журнал, поэтому и смену не выбирает.
+  if (canEdit() && !state.seller) askShift({ initial: true });
+}
+
+/* ---------- Вход по коду доступа ---------- */
+
+// Экран для тех, кто пришёл по сети. На самом компьютере с приложением он не
+// появляется никогда: там роль продавца выдаётся без всякого кода.
+function showLogin(err) {
+  document.body.innerHTML = `
+    <div class="login">
+      <form class="login__box" id="loginForm">
+        <div class="login__logo">НГУ</div>
+        <h1 class="login__title">Мерч НГУ — учёт товара</h1>
+        <p class="login__hint">${err && err.status === 403
+          ? esc(err.message)
+          : 'Введите код доступа. Его подскажет продавец — код виден у него в «Настройках».'}</p>
+        ${err && err.status === 403 ? '' : `
+        <input type="text" id="loginCode" class="login__code" autocomplete="one-time-code"
+               autocapitalize="characters" spellcheck="false" placeholder="код доступа" autofocus>
+        <button class="btn btn--primary login__btn" type="submit">Войти</button>`}
+        <div class="login__err" id="loginErr" hidden></div>
+      </form>
+    </div>`;
+  const form = document.getElementById('loginForm');
+  const box = document.getElementById('loginErr');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('loginCode');
+    if (!input) return;
+    box.hidden = true;
+    try {
+      await apiPost('/api/login', { code: input.value });
+      location.reload();
+    } catch (e2) {
+      box.textContent = e2.message;
+      box.hidden = false;
+      input.select();
+    }
+  });
 }
 
 init();

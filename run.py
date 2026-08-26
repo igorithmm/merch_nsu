@@ -25,6 +25,10 @@ from datetime import date, datetime, timedelta
 # чтобы проверка не требовала импорта пакета — тот может и не загрузиться).
 APP_TOKEN = "merch-nsu"
 
+# Адрес самого компьютера. Браузер на машине с приложением всегда открывает
+# именно его, даже когда сервер слушает ещё и локальную сеть.
+LOOPBACK = "127.0.0.1"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(os.environ.get("MERCH_DB", "")) or os.path.join(HERE, "data")
 LOG_PATH = os.path.join(DATA_DIR, "app.log")
@@ -127,7 +131,9 @@ def find_free_port(host, preferred):
 def main():
     parser = argparse.ArgumentParser(description="Учёт мерча НГУ")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=None,
+                        help="адрес прослушивания; по умолчанию зависит от того, "
+                             "включён ли совместный доступ в настройках")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--demo", action="store_true", help="заполнить пример данных")
     args = parser.parse_args()
@@ -136,11 +142,12 @@ def main():
 
     # Импорт внутри main: если пакет не загрузится, ошибку покажет окно,
     # а не молчаливое исчезновение процесса при запуске без консоли.
-    from app import db, server
+    from app import access, db, server
 
     # Повторный клик по ярлыку не поднимает второе приложение — просто открывает вкладку.
-    if already_running(args.host, args.port):
-        url = "http://%s:%d/" % (args.host, args.port)
+    # Стучимся всегда в петлю: 0.0.0.0 — это «слушать везде», а не адрес для запроса.
+    if already_running(LOOPBACK, args.port):
+        url = "http://%s:%d/" % (LOOPBACK, args.port)
         print("Приложение уже работает, открываю %s" % url)
         if not args.no_browser:
             webbrowser.open(url)
@@ -154,15 +161,28 @@ def main():
         print("  Пример данных добавлен: %d моделей." % added if added
               else "  База уже не пустая — пример данных не добавлен.")
 
-    port = find_free_port(args.host, args.port)
-    url = "http://%s:%d/" % (args.host, port)
-    httpd = server.serve(args.host, port)
+    # Совместный доступ выключен — слушаем только петлю, и снаружи машины
+    # приложения попросту не видно. Включён — слушаем все интерфейсы, но тогда
+    # сервер спрашивает код у всех, кто пришёл не с этого же компьютера.
+    sharing = access.sharing_enabled()
+    host = args.host if args.host else ("0.0.0.0" if sharing else LOOPBACK)
+
+    port = find_free_port(host, args.port)
+    url = "http://%s:%d/" % (LOOPBACK, port)
+    httpd = server.serve(host, port)
 
     print()
     print("  Мерч НГУ — учёт товара")
     print("  ----------------------")
     print("  Открыто:  %s" % url)
     print("  База:     %s" % db.DB_PATH)
+    if sharing:
+        for addr in access.lan_addresses():
+            print("  По сети:  http://%s:%d/  — этот адрес диктуют коллеге" % (addr, port))
+        if not access.lan_addresses():
+            print("  По сети:  сеть не найдена — проверьте кабель или Wi-Fi")
+    else:
+        print("  По сети:  выключено (включается в «Настройках»)")
     print("  Закрыть:  кнопка «Завершить работу» в шапке приложения")
     print()
 

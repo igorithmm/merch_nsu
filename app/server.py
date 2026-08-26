@@ -9,12 +9,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import api, db
+from . import access, api, db
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 
 # По этой метке ярлык запуска понимает, что приложение уже работает.
 APP_TOKEN = "merch-nsu"
+
+# Маршруты, доступные до входа: проверка живости для ярлыка, экран входа и
+# сам вход. Данных они не отдают.
+OPEN_ROUTES = {"ping", "session", "login", "logout"}
 
 _httpd = None
 
@@ -77,12 +81,61 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._dispatch("DELETE")
 
+    # --- кто пришёл --------------------------------------------------------
+
+    def _client_ip(self):
+        return (self.client_address or ("",))[0]
+
+    def _resolve_role(self):
+        return access.role_for_request(self._client_ip(), self.headers.get("Cookie"))
+
+    def _same_origin(self):
+        """Защита от запросов, которые чужая страница шлёт от имени продавца.
+        За компьютером с приложением роль выдаётся без кода, поэтому открытая
+        в том же браузере вредная страница могла бы «продать» товар за него.
+        Браузер всегда сообщает Origin в запросах на изменение — сверяем его
+        с адресом, по которому нас открыли. Без Origin (curl, наши же скрипты)
+        подделывать нечего: там нет ни куки, ни чужого браузера."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        host = self.headers.get("Host") or ""
+        return urlparse(origin).netloc == host
+
+    def _guard(self, method, route):
+        """Возвращает текст отказа или None, если запрос можно выполнять."""
+        if method != "GET" and not self._same_origin():
+            return ("Запрос пришёл со стороннего сайта", 403)
+        if route in OPEN_ROUTES:
+            return None
+        if self.role is None:
+            if not access.sharing_enabled():
+                return ("Доступ по сети выключен. Включить его может только тот, "
+                        "кто сидит за компьютером с приложением.", 403)
+            return ("Нужно войти по коду доступа", 401)
+        if method != "GET" and self.role == access.ROLE_VIEWER:
+            return ("Только просмотр: изменять данные с этого компьютера нельзя", 403)
+        # Бэкап — вся база одним файлом, вместе с кодами доступа. Отдать его
+        # наблюдателю значит подарить ему код продавца.
+        if route == "backup" and self.role != access.ROLE_SELLER:
+            return ("Бэкап скачивает только продавец", 403)
+        # Настройки совместного доступа меняются лишь за самой машиной с базой:
+        # так утёкший код не позволит ни переписать коды, ни закрыть доступ.
+        if route.startswith("share") and not access.is_local(self._client_ip()):
+            return ("Совместный доступ настраивается только на компьютере "
+                    "с приложением", 403)
+        return None
+
     def _dispatch(self, method):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         try:
+            self.role = self._resolve_role()
             if path.startswith("/api/"):
+                denied = self._guard(method, path[len("/api/"):].rstrip("/"))
+                if denied:
+                    return self._error(denied[0], denied[1])
                 self._handle_api(method, path, params)
             elif method == "GET":
                 self._serve_static(path)
@@ -101,8 +154,15 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET":
             if route == "ping":
                 return self._json({"app": APP_TOKEN})
+            if route == "session":
+                return self._json({
+                    "role": self.role,
+                    "local": access.is_local(self._client_ip()),
+                    "sharing": access.sharing_enabled(),
+                })
             if route == "bootstrap":
-                return self._json(api.bootstrap())
+                return self._json(api.bootstrap(
+                    role=self.role, local=access.is_local(self._client_ip())))
             if route == "products":
                 return self._json(
                     {"products": api.list_products(include_archived=params.get("archived") == "1")}
@@ -180,6 +240,17 @@ class Handler(BaseHTTPRequestHandler):
             if match:
                 api.purge_movement(int(match.group(1)))
                 return self._json({"ok": True})
+            if route == "login":
+                return self._login(body)
+            if route == "logout":
+                return self._send(
+                    200, json.dumps({"ok": True}), "application/json; charset=utf-8",
+                    {"Set-Cookie": access.cookie_header("")},
+                )
+            if route == "share":
+                return self._json(api.save_share(body))
+            if route == "share/code":
+                return self._json(api.reset_share_code(body))
             if route == "journal/clear":
                 return self._json(api.clear_journal(body))
             if route == "trash/empty":
@@ -241,6 +312,34 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._error("Метод не поддерживается", 405)
 
+    # --- вход по коду ------------------------------------------------------
+
+    def _login(self, body):
+        addr = self._client_ip()
+        if access.is_local(addr):
+            return self._json({"role": access.ROLE_SELLER})
+        if not access.sharing_enabled():
+            return self._error("Доступ по сети выключен", 403)
+
+        wait = access.attempt_block(addr)
+        if wait:
+            return self._error(
+                "Слишком много попыток. Попробуйте через %d мин." % ((wait + 59) // 60), 429)
+
+        role = access.role_for_code(body.get("code"))
+        if role is None:
+            access.note_failure(addr)
+            return self._error("Код не подходит", 401)
+
+        access.note_success(addr)
+        token = access.make_token(role)
+        return self._send(
+            200,
+            json.dumps({"role": role}, ensure_ascii=False),
+            "application/json; charset=utf-8",
+            {"Set-Cookie": access.cookie_header(token)},
+        )
+
     # --- статика -----------------------------------------------------------
 
     def _serve_static(self, path):
@@ -277,6 +376,7 @@ class Server(ThreadingHTTPServer):
 def serve(host="127.0.0.1", port=8765):
     global _httpd
     db.connect()
+    api.SHARE_PORT[0] = port
     db.purge_trash_daily()   # чистим корзину и при запуске, не только при открытии страницы
     _httpd = Server((host, port), Handler)
     _httpd.daemon_threads = True

@@ -736,3 +736,40 @@ html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); 
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
 .danger .panel__hint { margin: 0 0 10px; color: var(--danger); }
+
+/* ---------- Вход по коду доступа ---------- */
+.login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login__box { width: min(380px, 100%); padding: 30px 28px; border-radius: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(15, 26, 46, .12); text-align: center; }
+.login__logo { width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 12px;
+  display: grid; place-items: center; background: var(--accent); color: #fff;
+  font-weight: 800; font-size: 13px; letter-spacing: .04em; }
+.login__title { font-size: 19px; margin: 0 0 8px; }
+.login__hint { font-size: 13px; color: var(--text-dim); line-height: 1.45; margin: 0 0 18px; }
+.login__code { width: 100%; padding: 13px 14px; font-size: 20px; text-align: center;
+  letter-spacing: .16em; font-weight: 700; text-transform: uppercase;
+  border-radius: 10px; border: 1px solid var(--border-strong);
+  background: var(--surface-2); color: var(--text); }
+.login__code:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.login__btn { width: 100%; margin-top: 12px; padding: 12px; font-size: 15px; }
+.login__err { margin-top: 14px; padding: 9px 12px; border-radius: 9px; font-size: 13px;
+  background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- Роль «только просмотр» ---------- */
+.rolebadge { padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 650;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+body.is-viewer [data-write] { display: none !important; }
+
+/* ---------- Совместный доступ ---------- */
+.share__row { padding: 12px 0; border-top: 1px solid var(--border); }
+.share__row:first-child { border-top: 0; }
+.share__label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-faint); margin-bottom: 5px; }
+.share__url { font-size: 14px; font-weight: 650; }
+.share__code { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.share__code code { font-size: 19px; font-weight: 800; letter-spacing: .14em;
+  padding: 5px 11px; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent); }
+.share__row .panel__hint { margin: 6px 0 0; }
