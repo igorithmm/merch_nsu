@@ -536,6 +536,12 @@ def list_movements(params):
     if params.get("product_id"):
         where.append("product_id = ?")
         args.append(_int(params["product_id"], 0))
+    if params.get("category") in db.CATEGORIES:
+        # У записи хранится ссылка на товар, а не категория, поэтому сверяемся
+        # со справочником. Записи удалённых товаров (ссылка обнулена) в такую
+        # выборку не попадают — категорию у них уже не спросить.
+        where.append("product_id IN (SELECT id FROM products WHERE category = ?)")
+        args.append(params["category"])
     if params.get("seller"):
         where.append("seller = ?")
         args.append(params["seller"])

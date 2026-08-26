@@ -712,3 +712,6 @@ html[data-theme="dark"] .cat.is-active .cat__n { background: rgba(0, 0, 0, .3); 
 .shift__btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 
 #sellerSelect.is-empty { border-color: var(--danger); color: var(--danger); font-weight: 650; }
+
+/* Названия категорий длиннее прочих фильтров — им нужно больше места. */
+#journalCategory, #catalogCategory { max-width: 232px; }

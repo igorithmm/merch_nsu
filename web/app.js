@@ -7,12 +7,13 @@ const state = {
   filters: { q: '', category: '', kind: '', color: '', print: '', sizes: [],
              lowOnly: false, no1c: false, blocked: false },
   journal: { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '', from: '', to: '',
-             product_id: '', trash: false },
+             product_id: '', category: '', trash: false },
   wishes: { q: '', status: '' },
   report: { days: 30, from: '', to: '', kind: '', category: '', data: null },
   sort: localStorage.getItem('merch.sort') || 'title',
   view: localStorage.getItem('merch.view') || 'grid',
   showArchived: false,
+  catalogCategory: '',
 };
 
 // Цвет полоски на карточке. Ключ — основа слова без окончания, поэтому
@@ -456,7 +457,15 @@ function renderSellerSelect() {
       `<option ${s.name === state.journal.seller ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
 }
 
+function categoryOptions(selected) {
+  return '<option value="">Все категории</option>' +
+    Object.entries(state.data.categories).map(([id, label]) =>
+      `<option value="${id}" ${selected === id ? 'selected' : ''}>${esc(label)}</option>`).join('');
+}
+
 function renderRepFilters() {
+  $('#journalCategory').innerHTML = categoryOptions(state.journal.category);
+  $('#catalogCategory').innerHTML = categoryOptions(state.catalogCategory);
   const cats = state.data.categories;
   $('#repCategory').innerHTML = '<option value="">Все категории</option>' +
     Object.entries(cats).map(([id, label]) =>
@@ -976,7 +985,7 @@ async function loadJournal() {
   const params = {
     limit: j.limit, offset: j.offset, q: j.q, kind: j.kind, group: j.group,
     seller: j.seller, from: j.from, to: j.to, product_id: j.product_id,
-    trash: j.trash ? 1 : '',
+    category: j.category, trash: j.trash ? 1 : '',
   };
   $('#journalExport').href = '/api/export/movements.csv' + qs(
     Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'limit' && k !== 'offset')));
@@ -1219,9 +1228,12 @@ function renderReports(rep) {
 /* ---------- Вкладка «Товары» ---------- */
 
 async function catalogProducts() {
-  return state.showArchived
+  const all = state.showArchived
     ? (await apiGet('/api/products', { archived: 1 })).products
     : state.data.products;
+  return state.catalogCategory
+    ? all.filter((p) => p.category === state.catalogCategory)
+    : all;
 }
 
 async function renderCatalog() {
@@ -1229,7 +1241,9 @@ async function renderCatalog() {
   const body = $('#catalogBody');
   if (!products.length) {
     body.innerHTML = `<tr><td colspan="8"><div class="empty">
-      <div class="empty__title">Список пуст</div>Нажмите «Новая одежда» или «Новый сувенир».</div></td></tr>`;
+      <div class="empty__title">${state.catalogCategory ? 'В этой категории пусто' : 'Список пуст'}</div>
+      ${state.catalogCategory ? 'Выберите «Все категории» или заведите товар.'
+                              : 'Нажмите «Новая одежда» или «Новый сувенир».'}</div></td></tr>`;
     return;
   }
   body.innerHTML = products.map((p) => `
@@ -1466,7 +1480,9 @@ const HELP_SECTIONS = [
     <p><b>Желания</b> — что спрашивали покупатели, но чего не было: товар, дата,
        контакты клиента и продавец. У заявки есть статус: ждёт / клиенту сообщили / закрыта.</p>
     <p><b>Журнал</b> хранит все операции и правки справочника: когда, кто, что и на какую
-       сумму. Ненужную запись можно удалить в корзину; если она ещё учтена в остатках,
+       сумму. Фильтры сверху: категория (одежда или сувенирка), период, тип операции,
+       продавец и поиск по тексту — выгрузка в CSV учитывает выбранные фильтры.
+       Ненужную запись можно удалить в корзину; если она ещё учтена в остатках,
        приложение предложит сначала откатить операцию. Из корзины запись возвращается
        обратно, а через 60 дней удаляется сама.</p>
     <p>Товар удаляется на вкладке «Товары» в любой момент — даже если по нему уже были
@@ -1704,11 +1720,13 @@ function bind() {
     const value = e.target.value;
     jTimer = setTimeout(() => { state.journal.q = value; state.journal.offset = 0; loadJournal(); }, 220);
   });
-  ['journalKind', 'journalGroup', 'journalSeller', 'journalFrom', 'journalTo', 'journalTrash']
+  ['journalKind', 'journalGroup', 'journalCategory', 'journalSeller', 'journalFrom',
+   'journalTo', 'journalTrash']
     .forEach((id) => $('#' + id).addEventListener('change', () => {
       Object.assign(state.journal, {
         kind: $('#journalKind').value,
         group: $('#journalGroup').value,
+        category: $('#journalCategory').value,
         seller: $('#journalSeller').value,
         from: $('#journalFrom').value,
         to: $('#journalTo').value,
@@ -1719,9 +1737,9 @@ function bind() {
     }));
   $('#journalReset').addEventListener('click', () => {
     state.journal = { offset: 0, limit: 50, q: '', kind: '', group: '', seller: '', from: '',
-                      to: '', product_id: '', trash: false };
-    ['journalSearch', 'journalKind', 'journalGroup', 'journalSeller', 'journalFrom', 'journalTo']
-      .forEach((id) => { $('#' + id).value = ''; });
+                      to: '', product_id: '', category: '', trash: false };
+    ['journalSearch', 'journalKind', 'journalGroup', 'journalCategory', 'journalSeller',
+     'journalFrom', 'journalTo'].forEach((id) => { $('#' + id).value = ''; });
     $('#journalTrash').checked = false;
     loadJournal();
   });
@@ -1858,6 +1876,10 @@ function bind() {
   $('#addSouvenir').addEventListener('click', () => openProductForm(null, 'souvenir'));
   $('#showArchived').addEventListener('change', (e) => {
     state.showArchived = e.target.checked;
+    renderCatalog();
+  });
+  $('#catalogCategory').addEventListener('change', (e) => {
+    state.catalogCategory = e.target.value;
     renderCatalog();
   });
   $('#catalogBody').addEventListener('click', async (e) => {
