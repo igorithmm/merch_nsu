@@ -91,7 +91,7 @@
       <button class="btn btn--ghost" id="journalReset">Сбросить</button>
       <a class="btn btn--ghost" id="journalExport" href="/api/export/movements.csv">Выгрузить CSV</a>
       <span id="journalFocus"></span>
-      <label class="switch"><input type="checkbox" id="journalTrash"><span></span>Корзина<span class="badge badge--calm" data-badge="trash"></span></label>
+      <label class="switch" title="Показать удалённые записи вместо обычных"><input type="checkbox" id="journalTrash"><span></span>Показать корзину<span class="badge badge--calm" data-badge="trash"></span></label>
     </div>
     <div class="trash-note" id="trashNote" hidden></div>
     <div class="table-wrap">
@@ -180,7 +180,7 @@
         <option value="stock_desc">Остаток: сначала много</option>
         <option value="stock_asc">Остаток: сначала мало</option>
       </select>
-      <label class="switch"><input type="checkbox" id="showArchived"><span></span>Показывать архив</label>
+      <label class="switch" title="Показать в списке товары, убранные в архив"><input type="checkbox" id="showArchived"><span></span>Показывать архив</label>
     </div>
     <div class="table-wrap">
       <table class="table">
@@ -199,7 +199,9 @@
     <div class="cards2">
       <div class="panel" data-write>
         <h2 class="panel__title">Продавцы</h2>
-        <p class="panel__hint">Кто в смене — то имя и попадёт в журнал.</p>
+        <p class="panel__hint">Из этого списка выбирают, кто на смене — это имя и попадёт
+          в журнал. «Убрать из смены» прячет человека из выбора, но его прошлые записи
+          остаются на месте.</p>
         <ul class="sellers" id="sellerList"></ul>
         <form class="row" id="sellerForm">
           <input type="text" id="sellerName" placeholder="Имя продавца" autocomplete="off">
@@ -207,16 +209,17 @@
         </form>
       </div>
       <div class="panel" data-write>
-        <h2 class="panel__title">Пороги подсветки</h2>
-        <p class="panel__hint">Красный — товара нет, синий — нужно внимание при продаже
-          (снят с продажи или пересорт), зелёный — всё в порядке. Жёлтая подсветка «мало»
-          есть только у сувенирки: у одежды одна-две штуки размера это норма.</p>
-        <label class="field">Сувенирка: мало, шт (жёлтая подсветка)
+        <h2 class="panel__title">Пороги</h2>
+        <label class="field">Сувенирка: мало, шт
           <input type="number" id="lowSouvenir" min="0" max="999">
         </label>
+        <p class="panel__hint">С какого остатка подсвечивать сувенирку жёлтым. У одежды
+          такой подсветки нет: одна-две штуки размера — это норма.</p>
         <label class="field">Считать залежавшимся после, дней
           <input type="number" id="deadDays" min="1" max="999">
         </label>
+        <p class="panel__hint">Через сколько дней без продаж товар попадёт в отчёт
+          «Лежит без движения».</p>
         <button class="btn btn--primary" id="saveSettings">Сохранить</button>
       </div>
       <div class="panel">

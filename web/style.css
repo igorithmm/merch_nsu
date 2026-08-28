@@ -323,15 +323,28 @@ main { padding: 20px 18px 80px; max-width: 1500px; margin: 0 auto; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .hint { font-size: 12.5px; color: var(--text-faint); margin: -8px 0 13px; }
 
+/* Выключенный переключатель раньше был почти цвета фона, а белый бегунок — без
+   тени: вместе это читалось как заблокированный элемент, и его не нажимали.
+   Теперь дорожка темнее фона и обведена, бегунок с тенью, есть наведение. */
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
-  font-size: 13.5px; color: var(--text-dim); }
-.switch input { position: absolute; opacity: 0; }
-.switch span { width: 38px; height: 22px; border-radius: 999px; background: var(--border-strong);
-  position: relative; transition: background .15s; flex: 0 0 38px; }
-.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
-  border-radius: 50%; background: #fff; transition: transform .15s; }
-.switch input:checked + span { background: var(--accent); }
-.switch input:checked + span::after { transform: translateX(16px); }
+  font-size: 13.5px; color: var(--text-dim); user-select: none; }
+.switch:hover { color: var(--text); }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch span:first-of-type { width: 40px; height: 23px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  position: relative; flex: 0 0 40px; box-sizing: border-box;
+  transition: background .15s, border-color .15s; }
+.switch:hover span:first-of-type { border-color: var(--accent); }
+.switch span:first-of-type::after { content: ""; position: absolute; top: 2px; left: 2px;
+  width: 17px; height: 17px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 32, 60, .35);
+  border: 1px solid var(--border-strong);
+  box-sizing: border-box; transition: transform .15s, background .15s, border-color .15s; }
+.switch input:checked + span { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + span::after { transform: translateX(17px); border-color: var(--accent); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-theme="dark"] .switch span:first-of-type::after { background: #cfd8e8; }
+html[data-theme="dark"] .switch input:checked + span::after { background: #fff; }
 
 .sellers { list-style: none; margin: 0 0 14px; padding: 0; }
 .sellers li { display: flex; align-items: center; gap: 10px; padding: 8px 0;

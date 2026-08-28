@@ -250,6 +250,48 @@ def get_product(product_id):
     return row
 
 
+# Поля карточки товара в том же порядке, что и кортеж fields ниже: подпись для
+# журнала и способ показать значение человеку.
+EDIT_FIELDS = [
+    ("category", "категория", lambda v: CATEGORY_LABELS.get(v, v)),
+    ("kind", "тип товара", str),
+    ("color", "цвет", str),
+    ("print_name", "принт", str),
+    ("material", "материал", str),
+    ("price", "цена", lambda v: "%d ₽" % v),
+    ("sizes", "размерный ряд", str),
+    ("name_1c", "наименование в 1С", str),
+    ("link", "ссылка", str),
+    ("note", "заметка", str),
+    ("blocked", "снят с продажи", lambda v: "да" if v else "нет"),
+    ("block_note", "причина снятия с продажи", str),
+    ("attention", "обратить внимание", str),
+]
+
+
+def _edit_note(before, fields):
+    """Что именно поменялось в карточке — строкой для журнала.
+
+    Без этого запись «Товар изменён» ничего не объясняет: непонятно, поправили
+    опечатку в принте или переписали цену. Сравниваем старые значения с новыми
+    и перечисляем только те поля, которые действительно разошлись."""
+    changes = []
+    for (column, label, show), new_value in zip(EDIT_FIELDS, fields):
+        old_value = before[column]
+        if column == "blocked":
+            old_value = 1 if old_value else 0
+        if str(old_value) == str(new_value):
+            continue
+        was, now = show(old_value), show(new_value)
+        if not was:
+            changes.append("%s: %s" % (label, now or "—"))
+        elif not now:
+            changes.append("%s: очищено (было «%s»)" % (label, was))
+        else:
+            changes.append("%s: «%s» → «%s»" % (label, was, now))
+    return "; ".join(changes)
+
+
 def save_product(payload, product_id=None, seller=""):
     category = _category(payload.get("category"))
     kind = _text(payload.get("kind"), "kind")
@@ -301,14 +343,18 @@ def save_product(payload, product_id=None, seller=""):
             "%s, %s" % (CATEGORY_LABELS[category], _sizes_note(category, sizes)),
         )
     else:
-        get_product(product_id)
+        before = get_product(product_id)
+        note = _edit_note(before, fields)
         db.execute(
             "UPDATE products SET category = ?, kind = ?, color = ?, print_name = ?, "
             "material = ?, price = ?, sizes = ?, name_1c = ?, link = ?, note = ?, "
             "blocked = ?, block_note = ?, attention = ? WHERE id = ?",
             fields + (product_id,),
         )
-        db.log_event(db.KIND_PRODUCT_EDITED, product_id, title, seller)
+        # Карточку могли открыть и закрыть, ничего не тронув: пустую запись
+        # «Товар изменён» в журнал не пишем, она только засоряет историю.
+        if note:
+            db.log_event(db.KIND_PRODUCT_EDITED, product_id, title, seller, note)
 
     db.sync_stock_rows(product_id, sizes)
     return product_id
