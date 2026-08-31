@@ -423,18 +423,26 @@ function openReasonPopover(anchor, product, size, direction) {
               ${row.alt_note ? `<span class="muted">${esc(row.alt_note)}</span>` : ''}</div>` : '');
   $('#popQty').value = 1;
 
-  const item = (r) => {
+  // Знак операции хранится на самой кнопке. Выводить его из того, в каком списке
+  // числится причина, нельзя: «Случайный клик» есть и в приходе, и в расходе,
+  // и такой поиск всегда находил его первым в приходе — списание превращалось
+  // в добавление.
+  const item = (r, dir) => {
     const off = stop && r.kind === 'sale';
-    return `<button class="pop__item ${off ? 'is-off' : ''}" data-kind="${r.kind}" ${off ? 'disabled' : ''}>
+    return `<button class="pop__item ${off ? 'is-off' : ''}" data-kind="${r.kind}"
+        data-dir="${dir}" ${off ? 'disabled' : ''}>
       <span class="pop__label">${esc(r.label)}</span>
       <span class="pop__hint">${off ? 'недоступно: товар снят с продажи' : esc(r.hint)}</span>
     </button>`;
   };
-  const group = (title, list) => `<div class="pop__group">${title}</div>` + list.map(item).join('');
+  const group = (title, list, dir) => `<div class="pop__group">${title}</div>`
+    + list.map((r) => item(r, dir)).join('');
 
   $('#popList').innerHTML = direction === 0
-    ? group('Списать', state.data.minus_reasons) + group('Добавить', state.data.plus_reasons)
-    : (direction > 0 ? state.data.plus_reasons : state.data.minus_reasons).map(item).join('');
+    ? group('Списать', state.data.minus_reasons, -1)
+      + group('Добавить', state.data.plus_reasons, 1)
+    : (direction > 0 ? state.data.plus_reasons : state.data.minus_reasons)
+        .map((r) => item(r, direction > 0 ? 1 : -1)).join('');
 
   placePopover($('#pop'), anchor);
 }
@@ -456,11 +464,14 @@ function closePopover() {
   popContext = null;
 }
 
-async function applyReason(kind) {
+async function applyReason(kind, dir) {
   if (!popContext) return;
   const { product, size } = popContext;
-  const plus = state.data.plus_reasons.some((r) => r.kind === kind);
-  const direction = plus ? 1 : -1;
+  // Направление — то, под каким заголовком стояла нажатая кнопка. На всякий
+  // случай оставляем запасной путь: причина только для прихода даёт плюс.
+  const direction = dir === 1 || dir === -1
+    ? dir
+    : (state.data.plus_reasons.some((r) => r.kind === kind) ? 1 : -1);
   const qty = Math.max(1, Number($('#popQty').value) || 1);
   closePopover();
   try {
@@ -2161,7 +2172,7 @@ function bind() {
   // Меню причин
   $('#popList').addEventListener('click', (e) => {
     const item = e.target.closest('[data-kind]');
-    if (item) applyReason(item.dataset.kind);
+    if (item) applyReason(item.dataset.kind, Number(item.dataset.dir));
   });
   document.addEventListener('click', (e) => {
     // Экран входа и прощание подменяют весь body, а этот обработчик висит на
