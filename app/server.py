@@ -361,7 +361,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             match = re.fullmatch(r"wishes/(\d+)/status", route)
             if match:
-                api.set_wish_status(int(match.group(1)), (body.get("status") or "").strip())
+                api.set_wish_status(int(match.group(1)),
+                                    (body.get("status") or "").strip(), seller=seller)
                 return self._json({"ok": True})
             if route == "demo":
                 from . import demo
@@ -400,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(dict(info, products=api.list_products()))
             match = re.fullmatch(r"wishes/(\d+)", route)
             if match:
-                api.delete_wish(int(match.group(1)))
+                api.delete_wish(int(match.group(1)), seller=params.get("seller", ""))
                 return self._json({"ok": True})
             return self._error("Неизвестный запрос", 404)
 

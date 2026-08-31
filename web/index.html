@@ -21,6 +21,7 @@
       <select id="sellerSelect" aria-label="Продавец"></select>
     </label>
     <button class="btn btn--sm btn--quit" id="shutdownBtn" data-write data-local title="Закрыть приложение — данные уже сохранены">Завершить работу</button>
+    <button class="btn btn--sm" id="logoutBtn" data-remote title="Выйти и войти по другому коду доступа">Сменить роль</button>
     <button class="icon-btn" id="helpBtn" title="Справка по работе с приложением">?</button>
     <button class="icon-btn" id="themeBtn" title="Светлая / тёмная тема">◐</button>
   </div>
@@ -82,7 +83,8 @@
       <select id="journalGroup" class="select">
         <option value="">Всё подряд</option>
         <option value="stock">Движение товара</option>
-        <option value="events">Справочник</option>
+        <option value="events">Справочник товаров</option>
+        <option value="wishes">Желания</option>
       </select>
       <select id="journalKind" class="select"></select>
       <select id="journalSeller" class="select"></select>

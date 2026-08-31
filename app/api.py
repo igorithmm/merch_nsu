@@ -29,6 +29,10 @@ KIND_LABELS = {
     db.KIND_PRODUCT_RESTORED: "Товар из архива",
     db.KIND_PRODUCT_DELETED: "Товар удалён",
     db.KIND_JOURNAL_CLEARED: "Журнал очищен",
+    db.KIND_WISH_ADDED: "Желание записано",
+    db.KIND_WISH_EDITED: "Желание изменено",
+    db.KIND_WISH_STATUS: "Желание: статус",
+    db.KIND_WISH_DELETED: "Желание удалено",
 }
 
 # Причины прихода и расхода — из них собирается меню на кнопках + и −.
@@ -589,10 +593,19 @@ def list_movements(params):
     if params.get("kind"):
         where.append("kind = ?")
         args.append(params["kind"])
+    # Группы: движение остатка, правки справочника товаров и заявки покупателей.
+    # Последние тоже без движения по складу, поэтому отделяем их по типу события,
+    # иначе «Справочник» смешивал бы товары и желания.
+    wish_kinds = (db.KIND_WISH_ADDED, db.KIND_WISH_EDITED,
+                  db.KIND_WISH_STATUS, db.KIND_WISH_DELETED)
     if params.get("group") == "stock":
         where.append("delta <> 0")
     elif params.get("group") == "events":
-        where.append("delta = 0")
+        where.append("delta = 0 AND kind NOT IN (%s)" % ", ".join("?" * len(wish_kinds)))
+        args.extend(wish_kinds)
+    elif params.get("group") == "wishes":
+        where.append("kind IN (%s)" % ", ".join("?" * len(wish_kinds)))
+        args.extend(wish_kinds)
     if params.get("product_id"):
         where.append("product_id = ?")
         args.append(_int(params["product_id"], 0))
@@ -762,10 +775,13 @@ def list_wishes(params=None):
     params = params or {}
     where = []
     args = []
+    # Закрытые заявки остаются на виду: раньше они пропадали из списка, и это
+    # читалось как «приложение их удалило». Теперь по умолчанию видно всё, а
+    # закрытые уходят вниз (см. ORDER BY) и вычёркиваются в интерфейсе.
     if params.get("status"):
         where.append("status = ?")
         args.append(params["status"])
-    elif not str(params.get("all") or "") in ("1", "true"):
+    elif str(params.get("open") or "") in ("1", "true"):
         where.append("status <> 'closed'")
     if params.get("q"):
         where.append("(product LIKE ? OR contact LIKE ? OR seller LIKE ? OR note LIKE ?)")
@@ -781,6 +797,32 @@ def list_wishes(params=None):
     return rows
 
 
+# Поля заявки: подпись для журнала — чтобы правка была видна по существу,
+# как и у карточки товара.
+WISH_FIELDS = [
+    ("asked_on", "дата обращения"),
+    ("product", "товар"),
+    ("contact", "контакты"),
+    ("seller", "продавец"),
+    ("note", "комментарий"),
+]
+
+
+def _wish_note(before, fields):
+    changes = []
+    for (column, label), new_value in zip(WISH_FIELDS, fields):
+        old_value = before[column]
+        if str(old_value) == str(new_value):
+            continue
+        if not old_value:
+            changes.append("%s: %s" % (label, new_value or "—"))
+        elif not new_value:
+            changes.append("%s: очищено (было «%s»)" % (label, old_value))
+        else:
+            changes.append("%s: «%s» → «%s»" % (label, old_value, new_value))
+    return "; ".join(changes)
+
+
 def save_wish(payload, wish_id=None):
     product = _text(payload.get("product"), "product")
     if not product:
@@ -792,38 +834,63 @@ def save_wish(payload, wish_id=None):
         _text(payload.get("seller"), "seller"),
         _text(payload.get("note"), "wish_note"),
     )
+    # Заявки не привязаны к карточке товара, поэтому product_id у записи журнала
+    # нет — товар назван так, как его спросил покупатель.
+    who = _text(payload.get("seller"), "seller")
     if wish_id is None:
         cur = db.execute(
             "INSERT INTO wishes(asked_on, product, contact, seller, note, created_at) "
             "VALUES(?, ?, ?, ?, ?, ?)",
             fields + (db.now_iso(),),
         )
+        db.log_event(db.KIND_WISH_ADDED, None, "Желание: " + product, who,
+                     _text(payload.get("contact"), "contact"))
         return cur.lastrowid
-    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+
+    before = db.query_one("SELECT * FROM wishes WHERE id = ?", (wish_id,))
+    if not before:
         raise ApiError("Заявка не найдена", 404)
+    note = _wish_note(before, fields)
     db.execute(
         "UPDATE wishes SET asked_on = ?, product = ?, contact = ?, seller = ?, note = ? "
         "WHERE id = ?",
         fields + (wish_id,),
     )
+    if note:
+        db.log_event(db.KIND_WISH_EDITED, None, "Желание: " + product, who, note)
     return wish_id
 
 
-def set_wish_status(wish_id, status):
+def set_wish_status(wish_id, status, seller=""):
     if status not in WISH_STATUS_LABELS:
         raise ApiError("Неизвестный статус заявки")
-    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+    row = db.query_one("SELECT * FROM wishes WHERE id = ?", (wish_id,))
+    if not row:
         raise ApiError("Заявка не найдена", 404)
+    if row["status"] == status:
+        return
     db.execute(
         "UPDATE wishes SET status = ?, closed_at = ? WHERE id = ?",
         (status, db.now_iso() if status == "closed" else None, wish_id),
     )
+    db.log_event(
+        db.KIND_WISH_STATUS, None, "Желание: " + row["product"],
+        _text(seller, "seller"),
+        "«%s» → «%s»" % (WISH_STATUS_LABELS.get(row["status"], row["status"]),
+                         WISH_STATUS_LABELS[status]),
+    )
 
 
-def delete_wish(wish_id):
-    if not db.query_one("SELECT id FROM wishes WHERE id = ?", (wish_id,)):
+def delete_wish(wish_id, seller=""):
+    row = db.query_one("SELECT * FROM wishes WHERE id = ?", (wish_id,))
+    if not row:
         raise ApiError("Заявка не найдена", 404)
     db.execute("DELETE FROM wishes WHERE id = ?", (wish_id,))
+    db.log_event(
+        db.KIND_WISH_DELETED, None, "Желание: " + row["product"],
+        _text(seller, "seller"),
+        "статус на момент удаления: %s" % WISH_STATUS_LABELS.get(row["status"], row["status"]),
+    )
 
 
 # --- Отчёты ----------------------------------------------------------------

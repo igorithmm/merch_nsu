@@ -255,7 +255,11 @@ const apiPost = (url, body) => request(url, {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ seller: state.seller, ...(body || {}) }),
 });
-const apiDelete = (url) => request(url, { method: 'DELETE' });
+// У DELETE нет тела запроса, поэтому имя продавца уходит в адресе — иначе
+// удаление попадёт в журнал без автора.
+const apiDelete = (url) => request(
+  url + (url.includes('?') ? '&' : '?') + 'seller=' + encodeURIComponent(state.seller || ''),
+  { method: 'DELETE' });
 
 /* ---------- Уведомления ---------- */
 
@@ -353,8 +357,24 @@ function askShift({ initial = false } = {}) {
         if (e.key === 'Enter') { e.preventDefault(); box.querySelector('#shiftAdd').click(); }
       });
     },
-    buttons: initial ? [] : [{ label: 'Отмена', onClick: (close) => close() }],
+    // Обязательное окно смены закрыть нечем — иначе операции уйдут в журнал без
+    // имени. Но тот, кто пришёл по сети, мог просто перепутать код: не заставлять
+    // же его занимать чужую смену, чтобы вернуться к просмотру.
+    buttons: initial
+      ? (state.data.local === false
+          ? [{ label: 'Сменить роль', onClick: () => switchRole() }] : [])
+      : [{ label: 'Отмена', onClick: (close) => close() }],
   });
+}
+
+// Роль зашита в маркер входа, поэтому сменить её можно только заново
+// представившись: выходим и возвращаемся на экран ввода кода.
+async function switchRole() {
+  if (!confirm('Выйти и ввести код заново?\n\n'
+    + 'Роль зависит от того, какой код ввести: код продавца даёт полный доступ, '
+    + 'код наблюдателя — только просмотр.')) return;
+  try { await apiPost('/api/logout'); } catch (_) { /* всё равно перезагружаемся */ }
+  location.reload();
 }
 
 // Ни одна операция не должна уйти в журнал без имени продавца.
@@ -530,10 +550,10 @@ function renderRepFilters() {
   $('#repKind').innerHTML = '<option value="">Все типы товара</option>' +
     state.data.facets.kinds.map((k) =>
       `<option value="${esc(k)}" ${state.report.kind === k ? 'selected' : ''}>${esc(k)}</option>`).join('');
-  $('#wishStatus').innerHTML = '<option value="">Активные</option>' +
-    state.data.wish_statuses.map((s) =>
-      `<option value="${s.id}" ${state.wishes.status === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('') +
-    '<option value="__all">Все, включая закрытые</option>';
+  $('#wishStatus').innerHTML = '<option value="">Все заявки</option>'
+    + `<option value="__open" ${state.wishes.status === '__open' ? 'selected' : ''}>Только незакрытые</option>`
+    + state.data.wish_statuses.map((s) =>
+      `<option value="${s.id}" ${state.wishes.status === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('');
 }
 
 function setTab(tab) {
@@ -602,9 +622,16 @@ function sortComparator(mode) {
 }
 
 // Один пункт на цвет, а не на каждое написание: «бордовый» и «бордовая» — одно.
+// Товары выбранной категории. Фильтры строятся по ним, а не по всему складу:
+// в «Одежде» незачем предлагать «Термос», а в сувенирке — «Лонгслив».
+function productsInCategory() {
+  const cat = state.filters.category;
+  return cat ? state.data.products.filter((p) => p.category === cat) : state.data.products;
+}
+
 function colorOptions() {
   const groups = new Map();
-  state.data.products.forEach((p) => {
+  productsInCategory().forEach((p) => {
     const key = colorKey(p.color);
     if (!key) return;
     if (!groups.has(key)) {
@@ -633,7 +660,11 @@ function renderFilters() {
   $('#cats').innerHTML = cat('', 'Всё вместе')
     + Object.entries(categories).map(([id, label]) => cat(id, label)).join('');
 
-  const kinds = facets.kinds.map((k) =>
+  const shown = productsInCategory();
+  const kindList = [...new Set(shown.map((p) => p.kind))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const printList = [...new Set(shown.map((p) => p.print_name).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
+  const kinds = kindList.map((k) =>
     `<button class="chip ${f.kind === k ? 'is-active' : ''}" data-filter="kind" data-value="${esc(k)}">${esc(k)}</button>`).join('');
   const sel = (name, label, values, current) => values.length
     ? `<select class="select" data-filter="${name}">
@@ -642,7 +673,7 @@ function renderFilters() {
        </select>` : '';
   $('#filters').innerHTML = kinds
     + sel('color', 'Любой цвет', colorOptions(), f.color)
-    + sel('print', 'Любой принт', facets.prints.map((v) => [v, v]), f.print)
+    + sel('print', 'Любой принт', printList.map((v) => [v, v]), f.print)
     + `<button class="chip chip--danger ${f.lowOnly ? 'is-active' : ''}" data-filter="lowOnly">Заканчивается</button>`
     + `<button class="chip chip--warn ${f.no1c ? 'is-active' : ''}" data-filter="no1c">Нет в 1С</button>`
     + `<button class="chip chip--stop ${f.blocked ? 'is-active' : ''}" data-filter="blocked">Снято с продажи</button>`;
@@ -790,8 +821,7 @@ function renderCard(p) {
   const rows = shownSizes(p);
   const partial = !souvenir && rows.length < p.sizes.length;
   const body = souvenir
-    ? `<div class="sizes sizes--single">${tile(p, p.sizes[0] || { size: '—', qty: 0 }, false)}
-         <div class="single-hint">Сувенир — без размеров</div></div>`
+    ? `<div class="sizes sizes--single">${tile(p, p.sizes[0] || { size: '—', qty: 0 }, false)}</div>`
     : `<div class="sizes">${rows.map((s) => tile(p, s, true)).join('')}</div>`;
   const shownQty = rows.reduce((sum, s) => sum + s.qty, 0);
 
@@ -1208,7 +1238,7 @@ function askTrashMode(id, message) {
 async function loadWishes() {
   const w = state.wishes;
   const params = { q: w.q };
-  if (w.status === '__all') params.all = 1;
+  if (w.status === '__open') params.open = 1;
   else if (w.status) params.status = w.status;
 
   let data;
@@ -1226,7 +1256,8 @@ async function loadWishes() {
   body.innerHTML = data.wishes.map((w) => `
     <tr class="${w.status === 'closed' ? 'row-done' : ''}">
       <td class="num muted" style="white-space:nowrap">${fmtDate(w.asked_on)}</td>
-      <td style="font-weight:600">${esc(w.product)}</td>
+      <td style="font-weight:600">${w.status === 'closed'
+        ? `<span class="wish-done" title="Заявка закрыта">✓</span> ` : ''}${esc(w.product)}</td>
       <td>${esc(w.contact) || '<span class="muted">—</span>'}</td>
       <td>${esc(w.seller) || '<span class="muted">—</span>'}</td>
       <td class="muted">${esc(w.note)}</td>
@@ -1671,7 +1702,9 @@ const HELP_SECTIONS = [
        и то и другое.</p>
     <p><b>Поиск</b> ищет сразу по названию, цвету, принту и материалу: «толстовка фиолет»
        найдёт нужное. Быстро попасть в поле — клавиша <code>/</code>.</p>
-    <p><b>Фильтры</b> рядом с поиском: тип товара, цвет, принт, а также «Заканчивается»
+    <p><b>Фильтры</b> рядом с поиском показывают только то, что встречается в выбранной
+       категории: в «Одежде» не предлагаются кружки и термосы, в сувенирке — лонгсливы.
+       Это тип товара, цвет, принт, а также «Заканчивается»
        (где что-то на нуле или сувенирки мало), «Нет в 1С» и «Снято с продажи».
        Строка <b>«Размеры»</b> оставляет только выбранные размеры — можно отметить
        несколько сразу, например 42 и 44. В списке останутся лишь те модели, где такой
@@ -1803,14 +1836,20 @@ const HELP_SECTIONS = [
        товар, дата обращения, контакты клиента, продавец и комментарий. Пригодится
        при заказе новой партии и чтобы перезвонить, когда товар придёт.</p>
     <p>У заявки есть статус: <b>ждёт</b> → <b>клиенту сообщили</b> → <b>закрыта</b>.
-       Закрытые прячутся из списка, но остаются в истории и в выгрузке.</p>`],
+       Закрытые никуда не деваются: они остаются в списке, помечены галочкой и уходят
+       вниз. Убрать их можно только вручную кнопкой «Удалить» — приложение само заявки
+       не стирает. Список сверху фильтруется по статусу, если нужны только незакрытые.</p>
+    <p>Всё, что происходит с заявками, попадает в журнал: кто записал, кто поправил,
+       кто сменил статус и кто удалил. В журнале для этого есть отдельная группа
+       «Желания».</p>`],
 
   ['Журнал и корзина', `
-    <p><b>Журнал</b> хранит всё: продажи, поставки, возвраты, брак, коррекции — и правки
-       справочника (заведение товара, изменение карточки, архив, удаление). По каждой
-       записи видно, когда, кто, что, сколько штук и на какую сумму.</p>
-    <p>Фильтры сверху: поиск по тексту, категория, «Движение товара» или «Справочник»,
-       тип операции, продавец и период. Кнопка <b>«История»</b> на карточке товара
+    <p><b>Журнал</b> хранит всё: продажи, поставки, возвраты, брак, коррекции, правки
+       справочника (заведение товара, изменение карточки, архив, удаление) и работу
+       с желаниями. По каждой записи видно, когда, кто, что, сколько штук и на какую
+       сумму.</p>
+    <p>Фильтры сверху: поиск по тексту, категория, группа записей («Движение товара»,
+       «Справочник товаров» или «Желания»), тип операции, продавец и период. Кнопка <b>«История»</b> на карточке товара
        открывает журнал сразу по одной модели.</p>
     <p><b>«Откатить»</b> возвращает товар на склад и оставляет пометку об отмене.
        <b>«Удалить»</b> убирает запись в корзину — переключатель <b>«Показать корзину»</b>
@@ -1868,6 +1907,12 @@ const HELP_SECTIONS = [
        менять. Второй и дают начальнице. За самим компьютером в магазине код не
        спрашивают никогда. Код помнится в браузере 14 дней; сменили код в настройках —
        все, кто входил по старому, тут же вылетят.</p>
+    <p><b>Как сменить роль.</b> Роль определяется кодом, который ввели при входе,
+       поэтому поменять её можно только представившись заново: кнопка
+       <b>«Сменить роль»</b> в шапке (она видна только тем, кто пришёл по сети) выходит
+       и возвращает на экран ввода кода. Если вошли кодом продавца по ошибке, та же
+       кнопка есть и в окне «Кто на смене?» — занимать чужую смену, чтобы выйти,
+       не придётся.</p>
     <p><b>Windows спросит про брандмауэр</b> при первом включении: нажмите «Разрешить
        доступ» хотя бы для частных сетей. Если нажать «Отмена», коллега получит
        «не удалось установить соединение», хотя у вас всё будет выглядеть правильно.
@@ -1998,6 +2043,14 @@ function bind() {
     const btn = e.target.closest('[data-cat]');
     if (!btn) return;
     state.filters.category = btn.dataset.cat;
+    // Выбранный тип, цвет или принт может не встречаться в новой категории:
+    // тогда фильтр остаётся включённым, но его чипа на экране уже нет, и список
+    // выглядит пустым без видимой причины. Снимаем такие фильтры.
+    const shown = productsInCategory();
+    const f = state.filters;
+    if (f.kind && !shown.some((p) => p.kind === f.kind)) f.kind = '';
+    if (f.color && !shown.some((p) => colorKey(p.color) === f.color)) f.color = '';
+    if (f.print && !shown.some((p) => p.print_name === f.print)) f.print = '';
     renderStock();
   });
   $('#filters').addEventListener('click', (e) => {
@@ -2340,7 +2393,7 @@ function bind() {
       ].filter(Boolean).join('\n\n');
       if (!confirm(warn)) return;
       try {
-        const res = await apiDelete(`/api/products/${del.dataset.delete}?seller=${encodeURIComponent(state.seller)}`);
+        const res = await apiDelete(`/api/products/${del.dataset.delete}`);
         await reload();
         await renderCatalog();
         toast(res.movements
@@ -2431,6 +2484,7 @@ function bind() {
       toast(`Журнал очищен: удалено ${res.removed} ${plural(res.removed, 'запись', 'записи', 'записей')}`);
     } catch (err) { toast(esc(err.message), { kind: 'err' }); }
   });
+  $('#logoutBtn').addEventListener('click', switchRole);
   $('#shutdownBtn').addEventListener('click', async () => {
     if (!confirm('Завершить работу приложения? Все данные уже сохранены.')) return;
     try { await apiPost('/api/shutdown'); } catch (_) { /* сервер закрылся, не дослав ответ */ }

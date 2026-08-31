@@ -441,7 +441,6 @@ html[data-theme="dark"] .badge--calm { color: var(--bg); }
 
 .sizes--single { grid-template-columns: 96px 1fr; align-items: center; }
 .sizes--single .size__qty { font-size: 28px; padding: 12px 0 13px; }
-.single-hint { font-size: 12.5px; color: var(--text-faint); }
 
 /* ---------- Меню причин ---------- */
 .pop { position: fixed; z-index: 80; width: 268px; padding: 12px;
@@ -482,7 +481,10 @@ html[data-theme="dark"] .badge--calm { color: var(--bg); }
   padding: 10px 14px; margin-bottom: 12px; border-radius: var(--radius-sm);
   background: var(--surface-2); border: 1px solid var(--border);
   font-size: 13px; color: var(--text-dim); }
-.row-done td { opacity: .6; }
+/* Закрытая заявка остаётся в списке — она приглушена и помечена галочкой,
+   но её видно и можно удалить руками. */
+.row-done td { opacity: .62; }
+.wish-done { color: var(--ok); font-weight: 800; }
 .pill--defect { background: var(--danger-soft); color: var(--danger); }
 .pill--event { background: var(--surface-2); color: var(--text-faint);
   border: 1px dashed var(--border-strong); }
@@ -795,3 +797,7 @@ body.is-viewer [data-write] { display: none !important; }
 .share__note { background: var(--surface-2); color: var(--text-dim); }
 #shareCheck { margin-top: 10px; }
 body.is-remote [data-local] { display: none !important; }
+/* Обратное: показывать только тем, кто пришёл по сети. За самим компьютером
+   менять роль не на что — там доступ полный и без кода. */
+[data-remote] { display: none !important; }
+body.is-remote [data-remote] { display: inline-flex !important; }
