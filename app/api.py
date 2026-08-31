@@ -99,11 +99,23 @@ LIMITS = {
 }
 
 
+def _str(value):
+    """Строка из запроса, чем бы её ни прислали. JSON разрешает и число, и
+    список, а .strip() у них нет: без приведения такой запрос падал с ошибкой
+    500 вместо понятного ответа."""
+    return str(value if value is not None else "").strip()
+
+
 def _text(value, field, limit=None):
     """Строка из запроса: обрезаем по длине и убираем управляющие символы."""
     raw = str(value if value is not None else "")
     raw = "".join(ch for ch in raw if ch == "\n" or ch >= " ")
     return raw.strip()[: (limit or LIMITS.get(field, 200))]
+
+
+def seller_name(value):
+    """Имя продавца из запроса: его подставляет почти каждый обработчик."""
+    return _text(value, "seller")
 
 
 class ApiError(Exception):
@@ -115,17 +127,23 @@ class ApiError(Exception):
 
 # --- Вспомогательное -------------------------------------------------------
 
+# SQLite хранит целые в 64 битах. Число длиннее в запрос не влезает и роняет
+# его — а приходит оно только из мусорного ввода, поэтому просто обрезаем.
+INT_MAX = 2 ** 63 - 1
+
+
 def _int(value, default=0):
     try:
-        return int(str(value).strip())
+        number = int(str(value).strip())
     except (TypeError, ValueError):
         return default
+    return max(-INT_MAX - 1, min(INT_MAX, number))
 
 
 def _as_date(value, default):
     """Дата из запроса. Мусор не должен ронять отчёт с ошибкой 500."""
     try:
-        return date.fromisoformat((value or "").strip())
+        return date.fromisoformat(_str(value))
     except (ValueError, TypeError):
         return default
 
@@ -133,7 +151,7 @@ def _as_date(value, default):
 def _day_bounds(params):
     today = date.today()
     date_to = _as_date(params.get("to"), today)
-    if (params.get("from") or "").strip():
+    if _str(params.get("from")):
         date_from = _as_date(params.get("from"), today)
     else:
         days = max(1, min(_int(params.get("days"), 30), 3650))
@@ -156,7 +174,7 @@ def thresholds():
 
 
 def _category(value):
-    value = (value or "").strip()
+    value = _str(value)
     return value if value in db.CATEGORIES else db.CAT_CLOTHING
 
 
@@ -305,6 +323,27 @@ def save_product(payload, product_id=None, seller=""):
     if category == db.CAT_SOUVENIR:
         sizes = [db.ONE_SIZE]
         material = ""
+        # У сувенира ровно одна строка остатка, поэтому остальные размеры
+        # карточка больше не показывает — ни в плитке, ни в списке, ни в
+        # выгрузке. Товар при этом лежит на полке. Молча спрятать его нельзя:
+        # проще попросить сначала обнулить размеры. Проверяем только сам переход
+        # из одежды: иначе карточку, которую уже перевели, нельзя было бы даже
+        # открыть и поправить цену.
+        was_clothing = product_id is not None and db.query_one(
+            "SELECT category FROM products WHERE id = ?", (product_id,))
+        if was_clothing and was_clothing["category"] != db.CAT_SOUVENIR:
+            left = db.query(
+                "SELECT size, qty FROM stock WHERE product_id = ? AND qty <> 0 "
+                "AND size <> ? ORDER BY size",
+                (product_id, db.ONE_SIZE),
+            )
+            if left:
+                raise ApiError(
+                    "Нельзя перевести товар в сувенирную продукцию: на складе "
+                    "ещё есть размеры (%s). Спишите или продайте их, а потом "
+                    "меняйте категорию."
+                    % ", ".join("%s — %d шт" % (r["size"], r["qty"]) for r in left)
+                )
     else:
         sizes = db.parse_sizes(payload.get("sizes"))
         if not sizes:
@@ -446,7 +485,7 @@ def save_marks(payload):
     parts.append("снято с продажи: " + ", ".join(blocked) if blocked else "стоп-продаж нет")
     db.log_event(
         db.KIND_PRODUCT_EDITED, product_id, db.product_title(product),
-        (payload.get("seller") or "").strip(), "Отметки размеров — " + "; ".join(parts),
+        _text(payload.get("seller"), "seller"), "Отметки размеров — " + "; ".join(parts),
     )
     return {"overrides": with_alt, "blocked": blocked}
 
@@ -485,9 +524,9 @@ MOVE_KINDS = {r["kind"] for r in PLUS_REASONS} | {r["kind"] for r in MINUS_REASO
 
 def do_move(payload):
     product_id = _int(payload.get("product_id"), 0)
-    size = (payload.get("size") or "").strip()
+    size = _str(payload.get("size"))
     delta = _int(payload.get("delta"), 0)
-    kind = (payload.get("kind") or "").strip()
+    kind = _str(payload.get("kind"))
 
     if not size:
         raise ApiError("Не выбран размер")
@@ -520,7 +559,7 @@ def do_move(payload):
 def do_receipt(payload):
     """Поставка: сразу несколько размеров одной модели."""
     product_id = _int(payload.get("product_id"), 0)
-    seller = (payload.get("seller") or "").strip()
+    seller = _text(payload.get("seller"), "seller")
     note = _text(payload.get("note"), "note") or "Поставка"
     items = payload.get("items") or {}
     if not isinstance(items, dict):
@@ -547,7 +586,7 @@ def do_receipt(payload):
 def do_set_qty(payload):
     """Инвентаризация: выставить точный остаток по размеру."""
     product_id = _int(payload.get("product_id"), 0)
-    size = (payload.get("size") or "").strip()
+    size = _str(payload.get("size"))
     target = _int(payload.get("qty"), -1)
     if target < 0:
         raise ApiError("Остаток не может быть отрицательным")
@@ -560,13 +599,13 @@ def do_set_qty(payload):
     if delta == 0:
         return {"qty": current, "movement_id": None}
 
-    note = (payload.get("note") or "").strip() or "Инвентаризация: было %d, стало %d" % (
+    note = _text(payload.get("note"), "note") or "Инвентаризация: было %d, стало %d" % (
         current, target,
     )
     try:
         movement_id, new_qty = db.apply_movement(
             product_id, size, delta, db.KIND_CORRECTION,
-            seller=(payload.get("seller") or "").strip(), note=note,
+            seller=_text(payload.get("seller"), "seller"), note=note,
         )
     except db.StockError as exc:
         raise ApiError(str(exc))
@@ -576,7 +615,8 @@ def do_set_qty(payload):
 def do_undo(payload):
     try:
         qty = db.undo_movement(
-            _int(payload.get("movement_id"), 0), seller=(payload.get("seller") or "").strip()
+            _int(payload.get("movement_id"), 0),
+            seller=_text(payload.get("seller"), "seller"),
         )
     except db.StockError as exc:
         raise ApiError(str(exc))
@@ -592,7 +632,7 @@ def list_movements(params):
 
     if params.get("kind"):
         where.append("kind = ?")
-        args.append(params["kind"])
+        args.append(_str(params["kind"]))
     # Группы: движение остатка, правки справочника товаров и заявки покупателей.
     # Последние тоже без движения по складу, поэтому отделяем их по типу события,
     # иначе «Справочник» смешивал бы товары и желания.
@@ -617,16 +657,16 @@ def list_movements(params):
         args.append(params["category"])
     if params.get("seller"):
         where.append("seller = ?")
-        args.append(params["seller"])
+        args.append(_str(params["seller"]))
     if params.get("from"):
         where.append("ts >= ?")
-        args.append(params["from"] + " 00:00:00")
+        args.append(_str(params["from"]) + " 00:00:00")
     if params.get("to"):
         where.append("ts <= ?")
-        args.append(params["to"] + " 23:59:59")
+        args.append(_str(params["to"]) + " 23:59:59")
     if params.get("q"):
         where.append("(title LIKE ? OR note LIKE ? OR seller LIKE ? OR size LIKE ?)")
-        needle = "%" + params["q"].strip() + "%"
+        needle = "%" + _str(params["q"]) + "%"
         args.extend([needle] * 4)
 
     limit = max(1, min(_int(params.get("limit"), 100), 1000))
@@ -660,7 +700,7 @@ def trash_movement(payload):
         raise ApiError("Запись уже в корзине")
 
     active = mov["delta"] != 0 and not mov["undone"]
-    mode = (payload.get("mode") or "").strip()
+    mode = _str(payload.get("mode"))
     if active and mode not in ("undo", "keep"):
         raise ApiError(
             "Запись ещё учтена в остатках: %s %+d шт. Откатить её перед удалением?"
@@ -668,7 +708,7 @@ def trash_movement(payload):
         )
     if active and mode == "undo":
         try:
-            db.undo_movement(movement_id, seller=(payload.get("seller") or "").strip())
+            db.undo_movement(movement_id, seller=_text(payload.get("seller"), "seller"))
         except db.StockError as exc:
             raise ApiError(str(exc))
 
@@ -780,12 +820,12 @@ def list_wishes(params=None):
     # закрытые уходят вниз (см. ORDER BY) и вычёркиваются в интерфейсе.
     if params.get("status"):
         where.append("status = ?")
-        args.append(params["status"])
+        args.append(_str(params["status"]))
     elif str(params.get("open") or "") in ("1", "true"):
         where.append("status <> 'closed'")
     if params.get("q"):
         where.append("(product LIKE ? OR contact LIKE ? OR seller LIKE ? OR note LIKE ?)")
-        args.extend(["%" + params["q"].strip() + "%"] * 4)
+        args.extend(["%" + _str(params["q"]) + "%"] * 4)
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     rows = db.query(
@@ -862,6 +902,7 @@ def save_wish(payload, wish_id=None):
 
 
 def set_wish_status(wish_id, status, seller=""):
+    status = _str(status)
     if status not in WISH_STATUS_LABELS:
         raise ApiError("Неизвестный статус заявки")
     row = db.query_one("SELECT * FROM wishes WHERE id = ?", (wish_id,))
@@ -901,8 +942,8 @@ def build_reports(params):
     days = max(1, (date.fromisoformat(date_to) - date.fromisoformat(date_from)).days + 1)
     dead_days = max(1, _int(params.get("dead_days"), DEAD_DAYS_DEFAULT))
     low = thresholds()["low_souvenir"]
-    kind_filter = (params.get("kind") or "").strip()
-    category_filter = (params.get("category") or "").strip()
+    kind_filter = _str(params.get("kind"))
+    category_filter = _str(params.get("category"))
 
     products = {
         p["id"]: p
@@ -919,15 +960,30 @@ def build_reports(params):
     )
     rows = [r for r in raw if r["product_id"] in products]
 
+    # Операции удалённых товаров: ссылка на карточку обнулена, но продажа была
+    # и деньги в кассу пришли. Раньше они выпадали из отчёта целиком — журнал
+    # показывал продажу, а выручка за тот же период молча уменьшалась, хотя при
+    # удалении мы прямо обещаем сохранить историю. В таблицы по товарам такую
+    # запись не поставить (карточки уже нет), а в итоги периода — обязательно.
+    # С фильтром по типу или категории пропускаем: у осиротевшей записи не
+    # спросить, подходила ли она под фильтр.
+    orphans = ([r for r in raw if r["product_id"] is None]
+               if not kind_filter and not category_filter else [])
+
     sold = {}
     sold_amount = {}
     sale_ops = sale_amount = sale_qty = 0
     return_qty = return_amount = 0
     received_qty = defect_qty = 0
+    deleted_ops = deleted_qty = 0
 
-    for r in rows:
-        key = (r["product_id"], r["size"])
-        if r["kind"] in db.REVENUE_KINDS:
+    for r in rows + orphans:
+        if r["product_id"] is None:
+            if r["kind"] == db.KIND_SALE:
+                deleted_ops += r["ops"]
+                deleted_qty += -r["delta"]
+        elif r["kind"] in db.REVENUE_KINDS:
+            key = (r["product_id"], r["size"])
             sold[key] = sold.get(key, 0) - r["delta"]
             sold_amount[key] = sold_amount.get(key, 0) + r["amount"]
         if r["kind"] == db.KIND_SALE:
@@ -954,6 +1010,10 @@ def build_reports(params):
         "received_qty": received_qty,
         "defect_qty": defect_qty,
         "avg_price": round(sale_amount / sale_ops) if sale_ops else 0,
+        # Сколько из этих продаж пришлось на удалённые товары: в таблице «Что
+        # продаётся» их не будет, и без пояснения цифры выглядят несходящимися.
+        "deleted_ops": deleted_ops,
+        "deleted_qty": deleted_qty,
         "stock_qty": sum(s["qty"] for p in live for s in p["sizes"]),
         "stock_amount": sum(s["qty"] * p["price"] for p in live for s in p["sizes"]),
         "per_day": round(sale_qty / days, 2),
@@ -1120,23 +1180,33 @@ def _csv_row(writer, values):
     writer.writerow([_csv_cell(v) for v in values])
 
 
-def _csv_start():
+def _csv_start(header):
     """Строка «sep=;» решила бы вопрос региональных настроек Windows раз и
     навсегда, но её понимает только Excel — LibreOffice и большинство прочих
     программ показывают её как обычную первую строку с мусором в ячейке A1.
-    Поэтому просто держим заголовки без запятых: с ";"-разделителем это
-    достаточно, чтобы колонки не разъезжались ни в одной из программ."""
+
+    Обходимся без неё: разделитель программа выбирает по первой строке файла,
+    поэтому в шапке не должно быть ни одной запятой. Тогда выбор однозначен —
+    «;», — и запятые внутри данных («Толстовка НГУ, фиолет») уже не считаются
+    разделителями. Из-за запятой в шапке столбцы как раз и съезжали.
+    Правило легко нарушить, дописав столбец вроде «Снято с продажи, шт»,
+    поэтому шапка проходит через проверку — ошибку видно сразу, а не через
+    неделю в разъехавшемся файле у продавца."""
+    if any("," in title for title in header):
+        raise ApiError("В шапке выгрузки нельзя ставить запятую: %s"
+                       % "; ".join(t for t in header if "," in t), 500)
     buf = io.StringIO()
-    return buf, csv.writer(buf, delimiter=";")
+    writer = csv.writer(buf, delimiter=";")
+    _csv_row(writer, header)
+    return buf, writer
 
 
 def export_stock_csv():
     """Выгрузка для сверки с полкой: только то, что реально лежит на складе.
     Снятое с продажи тоже лежит на полке, поэтому попадает в файл наравне со
     всем остальным и никак не помечается. В шапке нет ни одной запятой —
-    иначе Excel с запятой в разделителях рвёт её не там, где строки данных."""
-    buf, writer = _csv_start()
-    _csv_row(writer, [
+    иначе программа примет за разделитель её, а не «;», и столбцы съедут."""
+    buf, writer = _csv_start([
         "Категория", "Тип", "Цвет", "Принт", "Размер", "Остаток",
         "Цена", "Наименование в 1С", "Пересорт", "Обратить внимание",
     ])
@@ -1157,8 +1227,7 @@ def export_stock_csv():
 
 def export_movements_csv(params):
     data = list_movements(dict(params, limit=1000000))
-    buf, writer = _csv_start()
-    _csv_row(writer, [
+    buf, writer = _csv_start([
         "Дата", "Операция", "Товар", "Размер", "Штук", "Продавец", "Сумма",
         "Продано в 1С как", "Комментарий", "Не пробито", "Отменено",
     ])
@@ -1172,8 +1241,8 @@ def export_movements_csv(params):
 
 
 def export_wishes_csv():
-    buf, writer = _csv_start()
-    _csv_row(writer, ["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
+    buf, writer = _csv_start(
+        ["Дата обращения", "Товар", "Контакты", "Продавец", "Статус", "Комментарий"])
     for w in list_wishes({"all": "1"}):
         _csv_row(writer, [
             w["asked_on"], w["product"], w["contact"], w["seller"],

@@ -116,8 +116,15 @@ def already_running(host, port):
         return False
 
 
+PORT_SCAN = 20
+
+
+def port_range(preferred):
+    return range(preferred, preferred + PORT_SCAN)
+
+
 def find_free_port(host, preferred):
-    for port in range(preferred, preferred + 20):
+    for port in port_range(preferred):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -146,8 +153,13 @@ def main():
 
     # Повторный клик по ярлыку не поднимает второе приложение — просто открывает вкладку.
     # Стучимся всегда в петлю: 0.0.0.0 — это «слушать везде», а не адрес для запроса.
-    if already_running(LOOPBACK, args.port):
-        url = "http://%s:%d/" % (LOOPBACK, args.port)
+    # Перебираем весь диапазон, а не один порт: если при первом запуске 8765 был
+    # занят чем-то посторонним, приложение село на соседний. Проверяя только
+    # 8765, второй клик его не находил и поднимал вторую копию — две программы
+    # на одном файле базы, и часть операций терялась бы.
+    running = next((p for p in port_range(args.port) if already_running(LOOPBACK, p)), None)
+    if running is not None:
+        url = "http://%s:%d/" % (LOOPBACK, running)
         print("Приложение уже работает, открываю %s" % url)
         if not args.no_browser:
             webbrowser.open(url)
@@ -166,6 +178,9 @@ def main():
     # сервер спрашивает код у всех, кто пришёл не с этого же компьютера.
     host = args.host if args.host else server.host_for_sharing()
     fixed_host = bool(args.host)
+    # С заданным вручную адресом переезд невозможен: пусть настройка это знает
+    # и не просит того, чего мы не сделаем.
+    server.fix_host(fixed_host)
 
     port = find_free_port(host, args.port)
     url = "http://%s:%d/" % (LOOPBACK, port)
@@ -185,7 +200,7 @@ def main():
         except KeyboardInterrupt:
             break
         wanted = server.take_rebind()
-        if not wanted or fixed_host:
+        if not wanted:
             break
         server.close()
         try:

@@ -50,6 +50,15 @@ _httpd = None
 # сокет не пересоздан, по сети никого нет, и показывать адрес нельзя.
 _bound_host = "127.0.0.1"
 _rebind_to = None
+# Адрес задали ключом --host: тогда галочка «доступ по сети» сокет не трогает.
+# Иначе главный цикл, который такую заявку выполнить не может, просто выходил —
+# и приложение молча закрывалось прямо под руками у продавца.
+_host_is_fixed = False
+
+
+def fix_host(fixed=True):
+    global _host_is_fixed
+    _host_is_fixed = bool(fixed)
 
 
 def bound_host():
@@ -79,7 +88,7 @@ def rebind(host):
     клик по ярлыку видит работающую программу и просто открывает вкладку,
     ничего не перезапуская, — а приложение уже показывало сетевой адрес."""
     global _rebind_to
-    if host == _bound_host:
+    if _host_is_fixed or host == _bound_host:
         return False
     _rebind_to = host
     if _httpd is not None:
@@ -300,15 +309,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "POST":
             body = self._read_json()
-            seller = (body.get("seller") or "").strip()
+            seller = api.seller_name(body.get("seller"))
             if route == "products":
                 product_id = api.save_product(body, seller=seller)
                 return self._json({"id": product_id, "products": api.list_products()})
-            match = re.fullmatch(r"products/(\d+)", route)
+            match = re.fullmatch(r"products/(\d{1,9})", route)
             if match:
                 api.save_product(body, product_id=int(match.group(1)), seller=seller)
                 return self._json({"products": api.list_products()})
-            match = re.fullmatch(r"products/(\d+)/archive", route)
+            match = re.fullmatch(r"products/(\d{1,9})/archive", route)
             if match:
                 api.archive_product(
                     int(match.group(1)), bool(body.get("archived", True)), seller=seller
@@ -324,11 +333,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.do_undo(body))
             if route == "movements/trash":
                 return self._json(api.trash_movement(body))
-            match = re.fullmatch(r"movements/(\d+)/restore", route)
+            match = re.fullmatch(r"movements/(\d{1,9})/restore", route)
             if match:
                 api.restore_movement(int(match.group(1)))
                 return self._json({"ok": True})
-            match = re.fullmatch(r"movements/(\d+)/purge", route)
+            match = re.fullmatch(r"movements/(\d{1,9})/purge", route)
             if match:
                 api.purge_movement(int(match.group(1)))
                 return self._json({"ok": True})
@@ -354,15 +363,17 @@ class Handler(BaseHTTPRequestHandler):
             if route == "punched":
                 return self._json(api.mark_punched(body))
             if route == "wishes":
-                return self._json({"id": api.save_wish(body), "wishes": api.list_wishes(body)})
-            match = re.fullmatch(r"wishes/(\d+)", route)
+                # Список отдаём целиком: тело запроса — это поля новой заявки,
+                # а не фильтр, и подставлять его в выборку значит случайно
+                # обрезать ответ по чужим ключам.
+                return self._json({"id": api.save_wish(body), "wishes": api.list_wishes()})
+            match = re.fullmatch(r"wishes/(\d{1,9})", route)
             if match:
                 api.save_wish(body, wish_id=int(match.group(1)))
                 return self._json({"ok": True})
-            match = re.fullmatch(r"wishes/(\d+)/status", route)
+            match = re.fullmatch(r"wishes/(\d{1,9})/status", route)
             if match:
-                api.set_wish_status(int(match.group(1)),
-                                    (body.get("status") or "").strip(), seller=seller)
+                api.set_wish_status(int(match.group(1)), body.get("status"), seller=seller)
                 return self._json({"ok": True})
             if route == "demo":
                 from . import demo
@@ -377,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
                 return None
             if route == "sellers":
                 return self._json({"id": api.add_seller(body.get("name")), "sellers": api.list_sellers(True)})
-            match = re.fullmatch(r"sellers/(\d+)/active", route)
+            match = re.fullmatch(r"sellers/(\d{1,9})/active", route)
             if match:
                 api.set_seller_active(int(match.group(1)), bool(body.get("active", True)))
                 return self._json({"sellers": api.list_sellers(True)})
@@ -395,13 +406,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("Неизвестный запрос", 404)
 
         if method == "DELETE":
-            match = re.fullmatch(r"products/(\d+)", route)
+            match = re.fullmatch(r"products/(\d{1,9})", route)
             if match:
-                info = api.delete_product(int(match.group(1)), seller=params.get("seller", ""))
+                info = api.delete_product(int(match.group(1)),
+                                          seller=api.seller_name(params.get("seller")))
                 return self._json(dict(info, products=api.list_products()))
-            match = re.fullmatch(r"wishes/(\d+)", route)
+            match = re.fullmatch(r"wishes/(\d{1,9})", route)
             if match:
-                api.delete_wish(int(match.group(1)), seller=params.get("seller", ""))
+                api.delete_wish(int(match.group(1)), seller=api.seller_name(params.get("seller")))
                 return self._json({"ok": True})
             return self._error("Неизвестный запрос", 404)
 
